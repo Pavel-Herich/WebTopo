@@ -2,13 +2,13 @@
 <html lang="sk">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content">
 <meta name="theme-color" content="#17212b">
 <meta name="mobile-web-app-capable" content="yes">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon-192.png">
 <title>WebTopo</title>
-<meta name="build" content="20261125-2318">
+<meta name="build" content="20261126-1207">
 <style>
 :root{--bg:#0f1720;--panel:#17212b;--panel2:#1e2a36;--line:#2a3846;--text:#e9eef2;--muted:#8fa0ae;--acc:#4fc3f7;--pri:#0288d1;--ok:#66bb6a;--warn:#ffb74d;--bad:#e57373;--leg:#ffffff}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -73,17 +73,24 @@ body.sketching #tools{display:flex}
 #tabs [data-v].on{background:var(--panel2);color:var(--text);border-color:#3b5163}
 #btnShot{flex:1.2;height:44px;border-radius:10px;border:0;background:var(--pri);color:#fff;font-weight:700}
 #btnShot:active{filter:brightness(1.2)}
-#toast{position:fixed;left:50%;top:calc(108px + env(safe-area-inset-top));transform:translate(-50%,-12px);max-width:92vw;padding:10px 16px;border-radius:12px;background:#263238;color:#fff;font-weight:600;box-shadow:0 6px 24px #0008;opacity:0;pointer-events:none;transition:.2s;z-index:50;text-align:center}
+#toast{position:fixed;left:50%;top:calc(8px + env(safe-area-inset-top));transform:translate(-50%,-12px);max-width:92vw;padding:10px 16px;border-radius:12px;background:#263238;color:#fff;font-weight:600;box-shadow:0 6px 24px #0008;opacity:0;pointer-events:none;transition:.2s;z-index:50;text-align:center}
 #toast.show{opacity:1;transform:translate(-50%,0)}
 #toast.ok{background:#2e7d32}#toast.bad{background:#c62828}
-.modal{position:fixed;inset:0;z-index:40;background:#000a;display:flex;align-items:flex-end;justify-content:center}
-.sheet{width:100%;max-width:560px;max-height:88vh;display:flex;flex-direction:column;background:var(--panel);border:1px solid var(--line);border-radius:16px 16px 0 0;padding-bottom:env(safe-area-inset-bottom);animation:up .16s ease-out}
+.modal{position:fixed;left:0;right:0;top:var(--vvt,0px);height:var(--vvh,100%);z-index:40;background:#000a;display:flex;align-items:flex-end;justify-content:center}
+.sheet{width:100%;max-width:560px;max-height:calc(100% - 8px);display:flex;flex-direction:column;min-height:0;background:var(--panel);border:1px solid var(--line);border-radius:16px 16px 0 0;padding-bottom:env(safe-area-inset-bottom);animation:up .16s ease-out}
 @keyframes up{from{transform:translateY(40px);opacity:.5}}
 @media (min-width:700px){.modal{align-items:center}.sheet{border-radius:16px}}
 .sh-h{display:flex;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid var(--line)}
-.sh-h b{flex:1;font-size:16px}
+.sh-h .ttl{flex:1;min-width:0}.sh-h b{display:block;font-size:16px}.sh-h small{display:block;color:var(--muted);font-size:12.5px;margin-top:1px}
 .x{width:36px;height:36px;border:0;border-radius:8px;background:transparent;color:var(--muted);font-size:18px}
-.sh-b{padding:12px 14px;overflow:auto}
+.sh-b{padding:12px 14px;overflow:auto;flex:1 1 auto;min-height:0;overscroll-behavior:contain}
+.sh-h,.sh-f{flex:none}
+.compact .sh-h{padding:9px 12px}.compact .sh-b{padding:8px 10px 12px}
+.mgrid{display:grid;gap:6px}.mgrid.r3{grid-template-columns:repeat(3,minmax(0,1fr))}.mgrid.r4{grid-template-columns:repeat(4,minmax(0,1fr));margin-top:6px}
+.mbtn{min-height:44px;padding:5px 4px;border-radius:9px;border:1px solid var(--line);background:var(--panel2);line-height:1.15;text-align:center}
+.mbtn b{display:block;font-size:13px;font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mbtn small{display:block;font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mbtn.on{border-color:var(--acc);box-shadow:inset 0 0 0 1px var(--acc)}.mbtn:disabled{opacity:.35}.mbtn:active{filter:brightness(1.25)}
 .sh-b:empty{display:none}
 .sh-f{display:flex;flex-wrap:wrap;gap:8px;padding:10px 14px 14px;justify-content:flex-end}
 .sh-f.vert{flex-direction:column}
@@ -165,7 +172,8 @@ details summary{cursor:pointer;color:var(--muted);margin:10px 0 6px}
 
   const D2R = Math.PI / 180, R2D = 180 / Math.PI;
   const COLORS = ['black', 'gray', 'brown', 'blue', 'red', 'green', 'orange'];
-  const XVI_K = 100 / 2.54; // px na meter pri 1:100 a 100 dpi (rovnako ako import PocketTopo v xtherione)
+  const XVI_K = 200 / 2.54; // jednotiek XVI/th2 na meter (78,74 – ako PocketTopo podklad v xtherione a PreTherione)
+  const SCRAP_SCALE_M = 10;  // dĺžka mierky v hlavičke scrapu: 10 m = 787,402 jednotky
 
   const norm360 = a => ((a % 360) + 360) % 360;
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
@@ -425,6 +433,34 @@ details summary{cursor:pointer;color:var(--muted);margin:10px 0 6px}
     return n;
   }
 
+  // Ťah, ktorým sa k stanici prišlo od počiatku (strom výpočtu), a stanica, z ktorej.
+  function incoming(s, name, geo) {
+    geo = geo || compute(s);
+    const P = geo.pos.get(name);
+    if (!P || !P.via) return null;
+    const leg = s.shots.find(x => x.id === P.via);
+    return leg ? { leg, from: P.pn } : null;
+  }
+  // Smer v rozvinutom reze: ťah do stanice, pri all aj všetky ťahy za ňou (smerom od počiatku).
+  function setExtend(s, name, dir, all) {
+    const geo = compute(s), ids = new Set();
+    const P = geo.pos.get(name);
+    if (P && P.via) ids.add(P.via);
+    if (all) {
+      const kids = new Map();
+      for (const [n, Q] of geo.pos) if (Q.pn != null) { if (!kids.has(Q.pn)) kids.set(Q.pn, []); kids.get(Q.pn).push(n); }
+      const sub = new Set([name]), q = [name];
+      while (q.length) { const n = q.shift(); for (const c of kids.get(n) || []) if (!sub.has(c)) { sub.add(c); q.push(c); } }
+      for (const L of s.shots) if (L.to && sub.has(L.from) && sub.has(L.to)) ids.add(L.id);
+    }
+    dir = dir >= 0 ? 1 : -1;
+    for (const L of s.shots) if (L.to && ids.has(L.id)) L.ext = dir;
+    const legs = s.shots.filter(x => x.to);
+    if (legs.length && ids.has(legs[legs.length - 1].id)) s.ext = dir;
+    s.modified = Date.now();
+    return ids.size;
+  }
+
   function stats(s) {
     let legs = 0, splays = 0, len = 0;
     for (const sh of s.shots) { if (sh.to) { legs++; len += sh.d; } else splays++; }
@@ -458,7 +494,7 @@ details summary{cursor:pointer;color:var(--muted);margin:10px 0 6px}
           const o = fwd ? L.to : L.from;
           if (pos.has(o)) continue;
           const v = vec(L), sg = fwd ? 1 : -1, e = L.ext >= 0 ? 1 : -1;
-          pos.set(o, { x: P.x + sg * v.dx, y: P.y + sg * v.dy, z: P.z + sg * v.dz, ex: P.ex + sg * e * v.h, comp });
+          pos.set(o, { x: P.x + sg * v.dx, y: P.y + sg * v.dy, z: P.z + sg * v.dz, ex: P.ex + sg * e * v.h, comp, pn: n, via: L.id });
           q.push(o);
         }
       }
@@ -611,7 +647,9 @@ details summary{cursor:pointer;color:var(--muted);margin:10px 0 6px}
       const q = projXY(geo.pos.get(first.value), proj);
       L.push('##XTHERION## xth_me_image_insert {' + fmt(q[0] * k - g.x0, 2) + ' 1 1.0} {' + fmt(q[1] * k - g.y0, 2) + ' ' + first.value + '} ' + xviName + ' 0 {}');
     }
-    L.push('', '', 'scrap ' + scrapName + ' -projection ' + (proj === 'plan' ? 'plan' : 'extended'));
+    // mierka v hlavičke: Therion ju pri scrape so stanicami nepotrebuje, PreTherion z nej berie mierku kresby
+    const sc = ' -scale [0 0 ' + fmt(SCRAP_SCALE_M * k, 3) + ' 0 0 0 ' + SCRAP_SCALE_M + ' 0 m]';
+    L.push('', '', 'scrap ' + scrapName + ' -projection ' + (proj === 'plan' ? 'plan' : 'extended') + sc);
     for (const [n, P] of geo.pos) {
       const q = projXY(P, proj);
       L.push('  point ' + fmt(q[0] * k - g.x0, 2) + ' ' + fmt(q[1] * k - g.y0, 2) + ' station -name ' + n);
@@ -741,7 +779,7 @@ details summary{cursor:pointer;color:var(--muted);margin:10px 0 6px}
     norm360, uid, isoDate, fmt, fmtAz, hex,
     distoxAck, decodeDistoX, DistoXStream, distoxBleFrame, decodeDistoXBle, decodeSap6, decodeBricPrimary, decodeBricMeta, decodeBricErr,
     newSurvey, normalizeSurvey, stationNames, suggestNext, setCurrent, angleBetween, shotsClose, averageShots,
-    addMeasurement, detectLeg, deleteShot, reverseShot, toggleExt, splitLeg, makeLeg, renameStation, stats,
+    addMeasurement, detectLeg, deleteShot, reverseShot, toggleExt, splitLeg, makeLeg, renameStation, stats, incoming, setExtend,
     compute, projXY, makeStroke, strokeAbs,
     toTherion, toPocketTopo, toXVI, toTh2, therionBundle, safeName, fromPocketTopo, fromJSON, crc32, zip, Simulator
   };
@@ -753,6 +791,7 @@ details summary{cursor:pointer;color:var(--muted);margin:10px 0 6px}
 (() => {
   'use strict';
   const WT = window.WT, U = WT.UUID;
+  const APP_VERSION = '1.1';
   const $ = s => document.querySelector(s);
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const num = v => parseFloat(String(v).trim().replace(',', '.'));
@@ -842,10 +881,17 @@ details summary{cursor:pointer;color:var(--muted);margin:10px 0 6px}
   const stack = [];
   function modal(title, body, buttons, opt) {
     opt = opt || {};
+    const tt = $('#toast'); if (!tt.classList.contains('bad')) tt.className = '';
     const el = document.createElement('div');
     el.className = 'modal';
-    el.innerHTML = '<div class="sheet' + (opt.wide ? ' wide' : '') + '"><div class="sh-h"><b></b><button class="x" aria-label="Zavrieť">✕</button></div><div class="sh-b"></div><div class="sh-f"></div></div>';
+    el.innerHTML = '<div class="sheet' + (opt.wide ? ' wide' : '') + '"><div class="sh-h"><div class="ttl"><b></b><small></small></div><button class="x" aria-label="Zavrieť">✕</button></div><div class="sh-b"></div><div class="sh-f"></div></div>';
     el.querySelector('.sh-h b').textContent = title;
+    if (opt.sub) el.querySelector('.sh-h small').textContent = opt.sub; else el.querySelector('.sh-h small').remove();
+    // políčko pri písaní: okno sa zmestí nad klávesnicu, telo okna sa podľa potreby roluje
+    el.addEventListener('focusin', e => {
+      if (!/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
+      setTimeout(() => { try { e.target.scrollIntoView({ block: 'nearest' }); } catch (x) { /* */ } }, 350);
+    });
     const b = el.querySelector('.sh-b');
     if (typeof body === 'string') b.innerHTML = body; else if (body) b.append(body);
     const m = { el, close: () => close(m) };
@@ -1402,15 +1448,18 @@ details summary{cursor:pointer;color:var(--muted);margin:10px 0 6px}
       this.ptrs.delete(e.pointerId);
       if (this.ptrs.size < 2) this.pinch = null;
       if (this.ptrs.size) return;
-      if (this.stroke && !cancel && !this.blocked) this.commitStroke();
+      const tap = !cancel && this.tap && !this.tap.moved && !this.blocked && performance.now() - this.tap.t < 350;
+      const hit = tap && this.tool !== 'erase' ? this.stationAt(this.tap) : null;
+      if (hit) this.stroke = null;
+      else if (this.stroke && !cancel && !this.blocked) this.commitStroke();
       this.stroke = null;
       if (this.tool === 'erase' && this.eraseSnap) {
         if (this.eraseSnap.length !== sv.sketch[this.proj].length) { this.pushUndo(this.eraseSnap); changed(); }
         this.eraseSnap = null;
       }
-      if (this.tool === 'pan' && this.tap && !this.tap.moved && !this.blocked && performance.now() - this.tap.t < 400) this.tapStation(this.tap);
       this.tap = null; this.blocked = false;
       this.requestRender();
+      if (hit) stationMenu(hit);
     }
     commitStroke() {
       const st = this.stroke; if (!st || st.pts.length < 2) return;
@@ -1441,23 +1490,48 @@ details summary{cursor:pointer;color:var(--muted);margin:10px 0 6px}
       });
       if (keep.length !== list.length) { sv.sketch[this.proj] = keep; this.requestRender(); }
     }
-    tapStation(p) {
-      if (!geo) return;
-      let best = null, bd = 24;
+    stationAt(p) {
+      if (!geo) return null;
+      let best = null, bd = 26;
       for (const [name, P] of geo.pos) { const q = this.xy(P), d = Math.hypot(this.sx(q[0]) - p.x, this.sy(q[1]) - p.y); if (d < bd) { bd = d; best = name; } }
-      if (best) stationMenu(best);
+      return best;
     }
   }
 
   // ============================== dialógy ==============================
   function stationMenu(name) {
-    const m = modal('Stanica ' + name, '', [
-      { label: 'Pokračovať z ' + name, cls: 'pri', onClick: () => { WT.setCurrent(sv, name); changed(); toast('Aktuálna stanica: ' + name); } },
-      { label: 'Premenovať…', onClick: () => { renameDialog(name); } },
-      { label: 'Zavrieť' }
-    ]);
-    const used = sv.shots.filter(x => x.from === name || x.to === name);
-    m.el.querySelector('.sh-b').innerHTML = '<p class="muted">' + used.filter(x => x.to).length + ' ťahov, ' + used.filter(x => !x.to).length + ' zámerov</p>';
+    const inc = WT.incoming(sv, name, geo);
+    const leg = inc && inc.leg;
+    const ext = leg ? (leg.ext >= 0 ? 1 : -1) : 0;
+    const btn = (id, main, sub, opt) => '<button class="mbtn' + (opt && opt.on ? ' on' : '') + '" data-a="' + id + '"' + (opt && opt.dis ? ' disabled' : '') +
+      '><b>' + esc(main) + '</b><small>' + esc(sub) + '</small></button>';
+    const body = '<div class="mgrid r3">' +
+      btn('rev', 'Otočiť ťah', leg ? leg.from + ' – ' + leg.to : 'bez ťahu', { dis: !leg }) +
+      btn('cont', 'Pokračovať', 'z ' + name, { on: sv.cur === name }) +
+      btn('ren', 'Premenovať', name) + '</div>' +
+      '<div class="mgrid r4">' +
+      btn('l1', '‹ Rozvinúť', 'vľavo', { dis: !leg, on: ext < 0 }) +
+      btn('r1', 'Rozvinúť ›', 'vpravo', { dis: !leg, on: ext > 0 }) +
+      btn('la', '‹ Všetko', 'odtiaľ vľavo') +
+      btn('ra', 'Všetko ›', 'odtiaľ vpravo') + '</div>';
+    const m = modal('Bod ' + name, body, [], { sub: inc ? 'z bodu ' + inc.from : (name === sv.start ? 'počiatočný bod' : '') });
+    m.el.classList.add('compact');
+    m.el.querySelector('.sh-b').addEventListener('click', e => {
+      const b = e.target.closest('button[data-a]'); if (!b || b.disabled) return;
+      const a = b.dataset.a;
+      close(m);
+      if (a === 'rev') { WT.reverseShot(sv, leg.id); changed(); toast('Ťah teraz ' + leg.from + ' → ' + leg.to); }
+      else if (a === 'cont') { WT.setCurrent(sv, name); changed(); toast('Pokračuješ z ' + name); }
+      else if (a === 'ren') renameDialog(name);
+      else {
+        const dir = a[0] === 'r' ? 1 : -1, all = a[1] === 'a';
+        const n = WT.setExtend(sv, name, dir, all);
+        changed();
+        const w = dir > 0 ? 'vpravo ›' : '‹ vľavo';
+        if (!all) toast('Ťah ' + leg.from + ' – ' + leg.to + ' rozvinutý ' + w);
+        else toast('Odtiaľ ' + n + (n === 1 ? ' ťah rozvinutý ' : n < 5 ? ' ťahy rozvinuté ' : ' ťahov rozvinutých ') + w);
+      }
+    });
   }
   function renameDialog(name) {
     modal('Premenovať stanicu', '<label>Nový názov pre ' + esc(name) + '<input id="rnTo" autofocus autocapitalize="off" autocomplete="off" value="' + esc(name) + '"></label>', [
@@ -1803,7 +1877,7 @@ details summary{cursor:pointer;color:var(--muted);margin:10px 0 6px}
       '<p><b>Meranie.</b> Každé meranie je zámer z aktuálnej stanice (Od). Tri zhodné merania za sebou (±5 cm, ±1,7°) sa spoja do ťahu Od → Do a aktuálnou stanicou sa stane Do. Štvrté zhodné meranie ťah len spresní.</p>' +
       '<p><b>Stanice.</b> Ťukni na pásik „Od → Do“: nastavíš, odkiaľ pokračuješ, a názov ďalšej stanice. Z inej ako poslednej stanice začne nová séria (1.3 → 2.1).</p>' +
       '<p><b>Tabuľka.</b> Ťuknutím na riadok: úprava, zmena smeru v reze (‹ ›), otočenie ťahu, rozdelenie ťahu späť na zámery, vymazanie.</p>' +
-      '<p><b>Náčrt.</b> Pôdorys a rozvinutý rez. Farbou kreslíš jedným prstom, dvoma prstami posúvaš a zväčšuješ. ✋ = posun (ťuknutím na stanicu z nej pokračuješ), guma maže celé čiary, ↶ vráti krok. Čiary sú ukotvené k najbližšej stanici, takže pri oprave dát sa posunú s ňou.</p>' +
+      '<p><b>Náčrt.</b> Pôdorys a rozvinutý rez. Farbou kreslíš jedným prstom, dvoma prstami posúvaš a zväčšuješ. ✋ = posun, guma maže celé čiary, ↶ vráti krok. Ťuknutím na bod otvoríš jeho menu: otočiť ťah, rozvinúť vľavo/vpravo (len ťah do bodu alebo všetko odtiaľ ďalej), pokračovať z bodu, premenovať. Čiary sú ukotvené k najbližšej stanici, takže pri oprave dát sa posunú s ňou.</p>' +
       '<p><b>Therion.</b> Export → Balík pre Therion: .th, .th2 s vloženým .xvi podkladom pre xtherion a PocketTopo .txt (xtherion ho importuje ako doteraz). Import vie načítať PocketTopo .txt aj zálohu .json.</p>' +
       '<p><b>Offline.</b> Po prvom otvorení funguje bez signálu. Dáta sa ukladajú v telefóne po každom meraní; pravidelne si rob export.</p>' +
       '</div>', [{ label: 'Rozumiem', cls: 'pri' }]);
@@ -1818,7 +1892,7 @@ details summary{cursor:pointer;color:var(--muted);margin:10px 0 6px}
   }
   function menuDialog() {
     const st = WT.stats(sv);
-    const m = modal('WebTopo', '<p class="muted">' + esc(sv.name) + ' · ' + st.legs + ' ťahov · ' + WT.fmt(st.len, 1) + ' m</p>', [
+    const m = modal('WebTopo ' + APP_VERSION, '<p class="muted">' + esc(sv.name) + ' · ' + st.legs + ' ťahov · ' + WT.fmt(st.len, 1) + ' m</p>', [
       { label: 'Prieskumy…', onClick: () => { surveysDialog(); } },
       { label: 'Vlastnosti prieskumu…', onClick: () => { surveyProps(); } },
       { label: 'Prístroj…', onClick: () => { deviceDialog(); } },
@@ -1892,6 +1966,11 @@ details summary{cursor:pointer;color:var(--muted);margin:10px 0 6px}
     document.addEventListener('pointerdown', () => { if (S.sound && !actx) { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { /* */ } } }, { once: true });
     renderDev();
     applyWake();
+    if (window.visualViewport) {
+      const vv = window.visualViewport, root = document.documentElement;
+      const fitVV = () => { root.style.setProperty('--vvh', vv.height + 'px'); root.style.setProperty('--vvt', vv.offsetTop + 'px'); };
+      vv.addEventListener('resize', fitVV); vv.addEventListener('scroll', fitVV); fitVV();
+    }
   }
 
   async function start() {
@@ -1907,7 +1986,7 @@ details summary{cursor:pointer;color:var(--muted);margin:10px 0 6px}
     if ('serviceWorker' in navigator && (location.protocol === 'https:' || /^(localhost|127\.0\.0\.1)$/.test(location.hostname))) {
       navigator.serviceWorker.register('sw.js').catch(() => {});
     }
-    window.WTapp = { get survey() { return sv; }, onMeasurement, showView, get dev() { return dev; }, planView: () => planView, elevView: () => elevView };
+    window.WTapp = { get survey() { return sv; }, get geo() { return geo; }, onMeasurement, showView, get dev() { return dev; }, planView: () => planView, elevView: () => elevView };
   }
   start();
 })();

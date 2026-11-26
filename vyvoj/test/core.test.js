@@ -178,9 +178,32 @@ ok('XVI pôdorys: stanice v mierke ako z xtherionu', () => {
   const ref = fs.readFileSync(path.join(demoDir, 'Demo_p.xvi'), 'utf8');
   const grab = t => { const m = {}; const blk = t.split('set XVIstations {')[1].split('}\nset')[0]; for (const r of blk.matchAll(/\{([-\d.]+) ([-\d.]+) (\S+)\}/g)) m[r[3]] = [+r[1], +r[2]]; return m; };
   const a = grab(xvi), b = grab(ref);
-  for (const k of Object.keys(b)) { near(a[k][0], b[k][0], 2.0, k); near(a[k][1], b[k][1], 2.0, k); }
+  // vzor z xtherionu je v 39,37 jednotkách na meter, náš export v 78,74 (ako PocketTopo podklad v PreTherione)
+  for (const k of Object.keys(b)) { near(a[k][0] / 2, b[k][0], 2.0, k); near(a[k][1] / 2, b[k][1], 2.0, k); }
   assert(/set XVIsketchlines \{\n  \{blue  /.test(xvi));
   assert(/set XVIgrid \{/.test(xvi));
+});
+ok('th2: mierka v hlavičke scrapu (10 m = 787,402 jednotky)', () => {
+  const p = WT.toTh2(demo, 'plan', 'Demo_p.xvi', 'Demo_p'), e = WT.toTh2(demo, 'elev', 'Demo_e.xvi', 'Demo_e');
+  assert(/scrap Demo_p -projection plan -scale \[0 0 787\.402 0 0 0 10 0 m\]/.test(p), p.split('\n')[5]);
+  assert(/scrap Demo_e -projection extended -scale \[0 0 787\.402 0 0 0 10 0 m\]/.test(e));
+  assert(/set XVIgrid \{[-\d.]+ [-\d.]+ 78\.7402 0\.0 0\.0 78\.7402 /.test(WT.toXVI(demo, 'plan')));
+});
+ok('Rozvinutie: ťah do bodu a všetko odtiaľ ďalej', () => {
+  const s = WT.fromPocketTopo(demoTxt, 'D');
+  const inc = WT.incoming(s, '504.2');
+  assert.strictEqual(inc.from, '504.1'); assert.strictEqual(inc.leg.from + inc.leg.to, '504.1504.2');
+  assert.strictEqual(WT.incoming(s, '503.0'), null);
+  WT.setExtend(s, '504.2', -1, false);
+  const ext = n => s.shots.find(x => x.to && x.from + '>' + x.to === n).ext;
+  assert.strictEqual(ext('504.1>504.2'), -1); assert.strictEqual(ext('504.2>504.3'), 1);
+  const n = WT.setExtend(s, '504.2', -1, true);
+  assert.strictEqual(n, 5);  // 504.1>504.2 … 504.5>504.6
+  for (const k of ['504.2>504.3', '504.3>504.4', '504.4>504.5', '504.5>504.6']) assert.strictEqual(ext(k), -1, k);
+  assert.strictEqual(ext('504.0>504.1'), 1); assert.strictEqual(ext('503.0>503.1'), -1);
+  assert.strictEqual(s.ext, -1, 'nové ťahy pokračujú vľavo');
+  WT.setExtend(s, '503.0', 1, true);
+  assert(s.shots.filter(x => x.to).every(x => x.ext === 1), 'z počiatku = celý prieskum');
 });
 ok('ZIP balík sa dá rozbaliť', () => {
   const files = WT.therionBundle(demo);

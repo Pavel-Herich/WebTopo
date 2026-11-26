@@ -2,6 +2,7 @@
 (() => {
   'use strict';
   const WT = window.WT, U = WT.UUID;
+  const APP_VERSION = '1.1';
   const $ = s => document.querySelector(s);
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const num = v => parseFloat(String(v).trim().replace(',', '.'));
@@ -91,10 +92,17 @@
   const stack = [];
   function modal(title, body, buttons, opt) {
     opt = opt || {};
+    const tt = $('#toast'); if (!tt.classList.contains('bad')) tt.className = '';
     const el = document.createElement('div');
     el.className = 'modal';
-    el.innerHTML = '<div class="sheet' + (opt.wide ? ' wide' : '') + '"><div class="sh-h"><b></b><button class="x" aria-label="Zavrieť">✕</button></div><div class="sh-b"></div><div class="sh-f"></div></div>';
+    el.innerHTML = '<div class="sheet' + (opt.wide ? ' wide' : '') + '"><div class="sh-h"><div class="ttl"><b></b><small></small></div><button class="x" aria-label="Zavrieť">✕</button></div><div class="sh-b"></div><div class="sh-f"></div></div>';
     el.querySelector('.sh-h b').textContent = title;
+    if (opt.sub) el.querySelector('.sh-h small').textContent = opt.sub; else el.querySelector('.sh-h small').remove();
+    // políčko pri písaní: okno sa zmestí nad klávesnicu, telo okna sa podľa potreby roluje
+    el.addEventListener('focusin', e => {
+      if (!/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
+      setTimeout(() => { try { e.target.scrollIntoView({ block: 'nearest' }); } catch (x) { /* */ } }, 350);
+    });
     const b = el.querySelector('.sh-b');
     if (typeof body === 'string') b.innerHTML = body; else if (body) b.append(body);
     const m = { el, close: () => close(m) };
@@ -651,15 +659,18 @@
       this.ptrs.delete(e.pointerId);
       if (this.ptrs.size < 2) this.pinch = null;
       if (this.ptrs.size) return;
-      if (this.stroke && !cancel && !this.blocked) this.commitStroke();
+      const tap = !cancel && this.tap && !this.tap.moved && !this.blocked && performance.now() - this.tap.t < 350;
+      const hit = tap && this.tool !== 'erase' ? this.stationAt(this.tap) : null;
+      if (hit) this.stroke = null;
+      else if (this.stroke && !cancel && !this.blocked) this.commitStroke();
       this.stroke = null;
       if (this.tool === 'erase' && this.eraseSnap) {
         if (this.eraseSnap.length !== sv.sketch[this.proj].length) { this.pushUndo(this.eraseSnap); changed(); }
         this.eraseSnap = null;
       }
-      if (this.tool === 'pan' && this.tap && !this.tap.moved && !this.blocked && performance.now() - this.tap.t < 400) this.tapStation(this.tap);
       this.tap = null; this.blocked = false;
       this.requestRender();
+      if (hit) stationMenu(hit);
     }
     commitStroke() {
       const st = this.stroke; if (!st || st.pts.length < 2) return;
@@ -690,23 +701,48 @@
       });
       if (keep.length !== list.length) { sv.sketch[this.proj] = keep; this.requestRender(); }
     }
-    tapStation(p) {
-      if (!geo) return;
-      let best = null, bd = 24;
+    stationAt(p) {
+      if (!geo) return null;
+      let best = null, bd = 26;
       for (const [name, P] of geo.pos) { const q = this.xy(P), d = Math.hypot(this.sx(q[0]) - p.x, this.sy(q[1]) - p.y); if (d < bd) { bd = d; best = name; } }
-      if (best) stationMenu(best);
+      return best;
     }
   }
 
   // ============================== dialógy ==============================
   function stationMenu(name) {
-    const m = modal('Stanica ' + name, '', [
-      { label: 'Pokračovať z ' + name, cls: 'pri', onClick: () => { WT.setCurrent(sv, name); changed(); toast('Aktuálna stanica: ' + name); } },
-      { label: 'Premenovať…', onClick: () => { renameDialog(name); } },
-      { label: 'Zavrieť' }
-    ]);
-    const used = sv.shots.filter(x => x.from === name || x.to === name);
-    m.el.querySelector('.sh-b').innerHTML = '<p class="muted">' + used.filter(x => x.to).length + ' ťahov, ' + used.filter(x => !x.to).length + ' zámerov</p>';
+    const inc = WT.incoming(sv, name, geo);
+    const leg = inc && inc.leg;
+    const ext = leg ? (leg.ext >= 0 ? 1 : -1) : 0;
+    const btn = (id, main, sub, opt) => '<button class="mbtn' + (opt && opt.on ? ' on' : '') + '" data-a="' + id + '"' + (opt && opt.dis ? ' disabled' : '') +
+      '><b>' + esc(main) + '</b><small>' + esc(sub) + '</small></button>';
+    const body = '<div class="mgrid r3">' +
+      btn('rev', 'Otočiť ťah', leg ? leg.from + ' – ' + leg.to : 'bez ťahu', { dis: !leg }) +
+      btn('cont', 'Pokračovať', 'z ' + name, { on: sv.cur === name }) +
+      btn('ren', 'Premenovať', name) + '</div>' +
+      '<div class="mgrid r4">' +
+      btn('l1', '‹ Rozvinúť', 'vľavo', { dis: !leg, on: ext < 0 }) +
+      btn('r1', 'Rozvinúť ›', 'vpravo', { dis: !leg, on: ext > 0 }) +
+      btn('la', '‹ Všetko', 'odtiaľ vľavo') +
+      btn('ra', 'Všetko ›', 'odtiaľ vpravo') + '</div>';
+    const m = modal('Bod ' + name, body, [], { sub: inc ? 'z bodu ' + inc.from : (name === sv.start ? 'počiatočný bod' : '') });
+    m.el.classList.add('compact');
+    m.el.querySelector('.sh-b').addEventListener('click', e => {
+      const b = e.target.closest('button[data-a]'); if (!b || b.disabled) return;
+      const a = b.dataset.a;
+      close(m);
+      if (a === 'rev') { WT.reverseShot(sv, leg.id); changed(); toast('Ťah teraz ' + leg.from + ' → ' + leg.to); }
+      else if (a === 'cont') { WT.setCurrent(sv, name); changed(); toast('Pokračuješ z ' + name); }
+      else if (a === 'ren') renameDialog(name);
+      else {
+        const dir = a[0] === 'r' ? 1 : -1, all = a[1] === 'a';
+        const n = WT.setExtend(sv, name, dir, all);
+        changed();
+        const w = dir > 0 ? 'vpravo ›' : '‹ vľavo';
+        if (!all) toast('Ťah ' + leg.from + ' – ' + leg.to + ' rozvinutý ' + w);
+        else toast('Odtiaľ ' + n + (n === 1 ? ' ťah rozvinutý ' : n < 5 ? ' ťahy rozvinuté ' : ' ťahov rozvinutých ') + w);
+      }
+    });
   }
   function renameDialog(name) {
     modal('Premenovať stanicu', '<label>Nový názov pre ' + esc(name) + '<input id="rnTo" autofocus autocapitalize="off" autocomplete="off" value="' + esc(name) + '"></label>', [
@@ -1052,7 +1088,7 @@
       '<p><b>Meranie.</b> Každé meranie je zámer z aktuálnej stanice (Od). Tri zhodné merania za sebou (±5 cm, ±1,7°) sa spoja do ťahu Od → Do a aktuálnou stanicou sa stane Do. Štvrté zhodné meranie ťah len spresní.</p>' +
       '<p><b>Stanice.</b> Ťukni na pásik „Od → Do“: nastavíš, odkiaľ pokračuješ, a názov ďalšej stanice. Z inej ako poslednej stanice začne nová séria (1.3 → 2.1).</p>' +
       '<p><b>Tabuľka.</b> Ťuknutím na riadok: úprava, zmena smeru v reze (‹ ›), otočenie ťahu, rozdelenie ťahu späť na zámery, vymazanie.</p>' +
-      '<p><b>Náčrt.</b> Pôdorys a rozvinutý rez. Farbou kreslíš jedným prstom, dvoma prstami posúvaš a zväčšuješ. ✋ = posun (ťuknutím na stanicu z nej pokračuješ), guma maže celé čiary, ↶ vráti krok. Čiary sú ukotvené k najbližšej stanici, takže pri oprave dát sa posunú s ňou.</p>' +
+      '<p><b>Náčrt.</b> Pôdorys a rozvinutý rez. Farbou kreslíš jedným prstom, dvoma prstami posúvaš a zväčšuješ. ✋ = posun, guma maže celé čiary, ↶ vráti krok. Ťuknutím na bod otvoríš jeho menu: otočiť ťah, rozvinúť vľavo/vpravo (len ťah do bodu alebo všetko odtiaľ ďalej), pokračovať z bodu, premenovať. Čiary sú ukotvené k najbližšej stanici, takže pri oprave dát sa posunú s ňou.</p>' +
       '<p><b>Therion.</b> Export → Balík pre Therion: .th, .th2 s vloženým .xvi podkladom pre xtherion a PocketTopo .txt (xtherion ho importuje ako doteraz). Import vie načítať PocketTopo .txt aj zálohu .json.</p>' +
       '<p><b>Offline.</b> Po prvom otvorení funguje bez signálu. Dáta sa ukladajú v telefóne po každom meraní; pravidelne si rob export.</p>' +
       '</div>', [{ label: 'Rozumiem', cls: 'pri' }]);
@@ -1067,7 +1103,7 @@
   }
   function menuDialog() {
     const st = WT.stats(sv);
-    const m = modal('WebTopo', '<p class="muted">' + esc(sv.name) + ' · ' + st.legs + ' ťahov · ' + WT.fmt(st.len, 1) + ' m</p>', [
+    const m = modal('WebTopo ' + APP_VERSION, '<p class="muted">' + esc(sv.name) + ' · ' + st.legs + ' ťahov · ' + WT.fmt(st.len, 1) + ' m</p>', [
       { label: 'Prieskumy…', onClick: () => { surveysDialog(); } },
       { label: 'Vlastnosti prieskumu…', onClick: () => { surveyProps(); } },
       { label: 'Prístroj…', onClick: () => { deviceDialog(); } },
@@ -1141,6 +1177,11 @@
     document.addEventListener('pointerdown', () => { if (S.sound && !actx) { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { /* */ } } }, { once: true });
     renderDev();
     applyWake();
+    if (window.visualViewport) {
+      const vv = window.visualViewport, root = document.documentElement;
+      const fitVV = () => { root.style.setProperty('--vvh', vv.height + 'px'); root.style.setProperty('--vvt', vv.offsetTop + 'px'); };
+      vv.addEventListener('resize', fitVV); vv.addEventListener('scroll', fitVV); fitVV();
+    }
   }
 
   async function start() {
@@ -1156,7 +1197,7 @@
     if ('serviceWorker' in navigator && (location.protocol === 'https:' || /^(localhost|127\.0\.0\.1)$/.test(location.hostname))) {
       navigator.serviceWorker.register('sw.js').catch(() => {});
     }
-    window.WTapp = { get survey() { return sv; }, onMeasurement, showView, get dev() { return dev; }, planView: () => planView, elevView: () => elevView };
+    window.WTapp = { get survey() { return sv; }, get geo() { return geo; }, onMeasurement, showView, get dev() { return dev; }, planView: () => planView, elevView: () => elevView };
   }
   start();
 })();

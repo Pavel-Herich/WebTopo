@@ -36,7 +36,8 @@ Každý paket sa potvrdí (ACK). Ak spojenie vypadne, appka sa skúša znovu pri
 - **Od → Do** (pásik hore): aktuálna stanica a názov ďalšej. Ťuknutím ich zmeníš. Z inej ako poslednej stanice začne nová séria (1.3 → 2.1), dá sa to prepnúť v Nastaveniach.
 - Každé meranie je zámer z aktuálnej stanice. **3 zhodné merania** (±5 cm, ±1,7°) = ťah a aktuálnou stanicou sa stane Do. Štvrté zhodné meranie ťah len spresní. Tolerancie a počet meraní (2/3/vypnuté) sú v Nastaveniach.
 - **Ťuknutie na riadok:** úprava, smer v reze ‹ ›, otočenie ťahu (spätný zámer), rozdelenie ťahu na zámery, „pokračovať z“, vymazanie.
-- **Náčrt:** jeden prst kreslí, dva prsty posúvajú a zväčšujú. Farby sú pod tlačidlom pera. ✋ posúva a ťuknutím na stanicu z nej pokračuješ. Guma maže celé čiary, ↶ vráti krok. Čiary sú ukotvené k najbližšej stanici, takže sa pri oprave dát posunú s ňou.
+- **Náčrt:** jeden prst kreslí, dva prsty posúvajú a zväčšujú. Farby sú pod tlačidlom pera. ✋ posúva. Guma maže celé čiary, ↶ vráti krok.
+- **Ťuknutie na bod v náčrte** otvorí jeho menu: hore „Bod X“ a pod ním „z bodu Y“. Tlačidlá sú v dvoch riadkoch: otočiť ťah Y – X, pokračovať z X, premenovať a rozvinúť ‹ / › len ťah do bodu alebo všetko odtiaľ ďalej (smerom od počiatku). Čiary sú ukotvené k najbližšej stanici, takže sa pri oprave dát posunú s ňou.
 - V menu je voľba **Nezhasínať obrazovku**.
 - Dáta sa ukladajú v telefóne (IndexedDB) po každom meraní. Export si rob pravidelne.
 
@@ -44,7 +45,8 @@ Každý paket sa potvrdí (ACK). Ak spojenie vypadne, appka sa skúša znovu pri
 
 - **Balík pre Therion (.zip):**
   - `.th`: centreline, `data normal from to length compass clino`, zámery ako `-`, `extend left/right`, dátum, tím, deklinácia a fix.
-  - `_p.th2` / `_e.th2`: scrap s bodmi staníc a vloženým `.xvi` podkladom (náčrt, ťahy, zámery, mriežka 1 m) pre xtherion.
+  - `_p.th2` / `_e.th2`: scrap s bodmi staníc, mierkou v hlavičke (`-scale [0 0 787.402 0 0 0 10 0 m]`) a vloženým `.xvi` podkladom (náčrt, ťahy, zámery, mriežka 1 m) pre xtherion a PreTherion.
+  - `.xvi` je v 78,74 jednotkách na meter, rovnako ako PocketTopo podklad. PreTherion z neho aj zo scrapov načíta mierku 0,0127 m na jednotku.
   - `_pockettopo.txt`: rovnaký formát ako „Export Therion“ z PocketTopo, takže xtherion → Import PocketTopo funguje ako doteraz.
   - `.webtopo.json`: úplná záloha.
 - **Import:** PocketTopo `.txt` (Therion export, aj s náčrtom) a záloha `.json`. Binárny `.top` zatiaľ nie.
@@ -56,5 +58,5 @@ Overenie: z importovaného vzorového súboru PocketTopo (Therion test `pocket-t
 - `src/core.js`: protokoly, merania, geometria, exporty a importy (bez UI, testovateľné v Node).
 - `src/app.js`, `src/index.html`: rozhranie.
 - `tools/build.py`: zostaví jeden `index.html` s vloženým kódom a `sw.js` s novou verziou cache.
-- `test/core.test.js` (`node test/core.test.js`): 20 testov jadra. Pakety DistoX, SAP6 a BRIC, ťahy a číslovanie staníc, porovnanie s PocketTopo a Therionom.
-- `test/ui_test.py`: 24 testov rozhrania v Chrome s falošným DistoX2 a DistoX BLE (Playwright). Spúšťa sa `python3 test/ui_test.py <dist> <out>`. Cesta k vzorovému `Demo.txt` je v skripte.
+- `test/core.test.js` (`node test/core.test.js`): 22 testov jadra. Pakety DistoX, SAP6 a BRIC, ťahy a číslovanie staníc, rozvinutie, porovnanie s PocketTopo a Therionom.
+- `test/ui_test.py`: 31 testov rozhrania v Chrome s falošným DistoX2 a DistoX BLE (Playwright). Spúšťa sa `python3 test/ui_test.py <dist> <out>`. Cesta k vzorovému `Demo.txt` je v skripte.

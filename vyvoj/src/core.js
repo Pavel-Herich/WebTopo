@@ -8,7 +8,8 @@
 
   const D2R = Math.PI / 180, R2D = 180 / Math.PI;
   const COLORS = ['black', 'gray', 'brown', 'blue', 'red', 'green', 'orange'];
-  const XVI_K = 100 / 2.54; // px na meter pri 1:100 a 100 dpi (rovnako ako import PocketTopo v xtherione)
+  const XVI_K = 200 / 2.54; // jednotiek XVI/th2 na meter (78,74 – ako PocketTopo podklad v xtherione a PreTherione)
+  const SCRAP_SCALE_M = 10;  // dĺžka mierky v hlavičke scrapu: 10 m = 787,402 jednotky
 
   const norm360 = a => ((a % 360) + 360) % 360;
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
@@ -268,6 +269,34 @@
     return n;
   }
 
+  // Ťah, ktorým sa k stanici prišlo od počiatku (strom výpočtu), a stanica, z ktorej.
+  function incoming(s, name, geo) {
+    geo = geo || compute(s);
+    const P = geo.pos.get(name);
+    if (!P || !P.via) return null;
+    const leg = s.shots.find(x => x.id === P.via);
+    return leg ? { leg, from: P.pn } : null;
+  }
+  // Smer v rozvinutom reze: ťah do stanice, pri all aj všetky ťahy za ňou (smerom od počiatku).
+  function setExtend(s, name, dir, all) {
+    const geo = compute(s), ids = new Set();
+    const P = geo.pos.get(name);
+    if (P && P.via) ids.add(P.via);
+    if (all) {
+      const kids = new Map();
+      for (const [n, Q] of geo.pos) if (Q.pn != null) { if (!kids.has(Q.pn)) kids.set(Q.pn, []); kids.get(Q.pn).push(n); }
+      const sub = new Set([name]), q = [name];
+      while (q.length) { const n = q.shift(); for (const c of kids.get(n) || []) if (!sub.has(c)) { sub.add(c); q.push(c); } }
+      for (const L of s.shots) if (L.to && sub.has(L.from) && sub.has(L.to)) ids.add(L.id);
+    }
+    dir = dir >= 0 ? 1 : -1;
+    for (const L of s.shots) if (L.to && ids.has(L.id)) L.ext = dir;
+    const legs = s.shots.filter(x => x.to);
+    if (legs.length && ids.has(legs[legs.length - 1].id)) s.ext = dir;
+    s.modified = Date.now();
+    return ids.size;
+  }
+
   function stats(s) {
     let legs = 0, splays = 0, len = 0;
     for (const sh of s.shots) { if (sh.to) { legs++; len += sh.d; } else splays++; }
@@ -301,7 +330,7 @@
           const o = fwd ? L.to : L.from;
           if (pos.has(o)) continue;
           const v = vec(L), sg = fwd ? 1 : -1, e = L.ext >= 0 ? 1 : -1;
-          pos.set(o, { x: P.x + sg * v.dx, y: P.y + sg * v.dy, z: P.z + sg * v.dz, ex: P.ex + sg * e * v.h, comp });
+          pos.set(o, { x: P.x + sg * v.dx, y: P.y + sg * v.dy, z: P.z + sg * v.dz, ex: P.ex + sg * e * v.h, comp, pn: n, via: L.id });
           q.push(o);
         }
       }
@@ -454,7 +483,9 @@
       const q = projXY(geo.pos.get(first.value), proj);
       L.push('##XTHERION## xth_me_image_insert {' + fmt(q[0] * k - g.x0, 2) + ' 1 1.0} {' + fmt(q[1] * k - g.y0, 2) + ' ' + first.value + '} ' + xviName + ' 0 {}');
     }
-    L.push('', '', 'scrap ' + scrapName + ' -projection ' + (proj === 'plan' ? 'plan' : 'extended'));
+    // mierka v hlavičke: Therion ju pri scrape so stanicami nepotrebuje, PreTherion z nej berie mierku kresby
+    const sc = ' -scale [0 0 ' + fmt(SCRAP_SCALE_M * k, 3) + ' 0 0 0 ' + SCRAP_SCALE_M + ' 0 m]';
+    L.push('', '', 'scrap ' + scrapName + ' -projection ' + (proj === 'plan' ? 'plan' : 'extended') + sc);
     for (const [n, P] of geo.pos) {
       const q = projXY(P, proj);
       L.push('  point ' + fmt(q[0] * k - g.x0, 2) + ' ' + fmt(q[1] * k - g.y0, 2) + ' station -name ' + n);
@@ -584,7 +615,7 @@
     norm360, uid, isoDate, fmt, fmtAz, hex,
     distoxAck, decodeDistoX, DistoXStream, distoxBleFrame, decodeDistoXBle, decodeSap6, decodeBricPrimary, decodeBricMeta, decodeBricErr,
     newSurvey, normalizeSurvey, stationNames, suggestNext, setCurrent, angleBetween, shotsClose, averageShots,
-    addMeasurement, detectLeg, deleteShot, reverseShot, toggleExt, splitLeg, makeLeg, renameStation, stats,
+    addMeasurement, detectLeg, deleteShot, reverseShot, toggleExt, splitLeg, makeLeg, renameStation, stats, incoming, setExtend,
     compute, projXY, makeStroke, strokeAbs,
     toTherion, toPocketTopo, toXVI, toTh2, therionBundle, safeName, fromPocketTopo, fromJSON, crc32, zip, Simulator
   };
