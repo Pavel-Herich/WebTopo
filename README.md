@@ -27,13 +27,13 @@ Webová aplikácia (PWA) v štýle PocketTopo pre Android. Priamo cez Bluetooth 
 | Iný BLE | BLE | protokol sa zistí podľa služieb |
 | Simulátor | – | na vyskúšanie bez prístroja |
 
-Každý paket sa potvrdí (ACK). Ak spojenie vypadne, appka sa skúša znovu pripojiť každé 4 s a prístroj medzitým drží neodoslané merania v pamäti. Prístroj → **Denník komunikácie** ukazuje surové pakety v hex, čo pomôže pri ladení so skutočným prístrojom.
+Prístroj sa vyberá zo zoznamu len prvýkrát (alebo cez „Iný prístroj“). Potom sa appka pripája sama bez okna výberu, po výpadku aj po spustení; „Odpojiť“ automatické pripájanie vypne. Každý paket sa potvrdí (ACK). Ak spojenie vypadne, appka sa skúša znovu pripojiť každé 4 s a prístroj medzitým drží neodoslané merania v pamäti. Prístroj → **Denník komunikácie** ukazuje surové pakety v hex, čo pomôže pri ladení so skutočným prístrojom.
 
 **Nebolo odskúšané so skutočným prístrojom.** Protokoly sú prevzaté zo zdrojových kódov SexyTopo a TopoDroid a overené na ich testovacích paketoch. Komunikácia bola testovaná s falošným DistoX2 a DistoX BLE v Chrome. Prvá vec na skúšku je DistoX2 cez Web Serial na Androide. Ak sa v zozname neobjaví, zaškrtni „Ukázať všetky sériové zariadenia“.
 
 ## Práca v jaskyni
 
-- **Od → Do** (pásik hore): aktuálna stanica a názov ďalšej. Ťuknutím ich zmeníš. Z inej ako poslednej stanice začne nová séria (1.3 → 2.1), dá sa to prepnúť v Nastaveniach.
+- **Od → Do** (pásik hore): aktuálna stanica a názov ďalšej, ťuknutím ich zmeníš. Nový prieskum začína bodom **1**, ďalej 2, 3… Odbočka zo staršej stanice dostane ďalšie voľné číslo; pri názvoch so sériou (1.3) začne novú sériu (2.1).
 - Každé meranie je zámer z aktuálnej stanice. **3 zhodné merania** (±5 cm, ±1,7°) = ťah a aktuálnou stanicou sa stane Do. Štvrté zhodné meranie ťah len spresní. Tolerancie a počet meraní (2/3/vypnuté) sú v Nastaveniach.
 - **Tabuľka:**
   - Ťuknutie na riadok ho označí, aj v náčrte.
@@ -41,7 +41,7 @@ Každý paket sa potvrdí (ACK). Ak spojenie vypadne, appka sa skúša znovu pri
   - Dvojklik alebo dlhé podržanie na hodnote ju priamo upraví; na ‹ › prepne smer v reze.
   - **Posledný riadok** je nové meranie ručne z aktuálnej stanice: Do (prázdne = zámer), dĺžka, azimut, sklon a potom Enter alebo +.
   - ↶ pri pásiku Od → Do vráti posledný krok v dátach (meranie, úpravu, mazanie, zmenu staníc).
-- **Náčrt:** predvolene posun, dva prsty zväčšujú, + a − priblížia a oddialia. Pero (prvé ťuknutie zapne pero, druhé otvorí farby) kreslí. Guma maže celé čiary, ↶ vráti krok.
+- **Náčrt** je na celú obrazovku (horné lišty sú len v tabuľke): predvolene posun, dva prsty zväčšujú, + a − priblížia a oddialia. Pero (prvé ťuknutie zapne pero, druhé otvorí farby) kreslí. Guma maže celé čiary, ↶ vráti krok.
 - **⌖** dá aktívny (posledne pridaný) bod do stredu a priblíži tak, aby bol na obrazovke celý jeho polygón. Mriežka je vždy 1 m; pri veľkom oddialení slabne a pod 3 px na meter sa nekreslí.
 - Ťuknutý bod v náčrte aj kliknutý riadok tabuľky ostanú jemne zvýraznené. Vybraný riadok je zvýraznený aj v náčrte.
 - **Ťuknutie na bod v náčrte** otvorí jeho menu: hore „Bod X“ a pod ním „z bodu Y“. Tlačidlá sú v dvoch riadkoch: otočiť ťah Y – X, pokračovať z X, premenovať a rozvinúť ‹ / › len ťah do bodu alebo všetko odtiaľ ďalej (smerom od počiatku). Čiary sú ukotvené k najbližšej stanici, takže sa pri oprave dát posunú s ňou.
@@ -66,5 +66,5 @@ Overenie: z importovaného vzorového súboru PocketTopo (Therion test `pocket-t
 - `src/core.js`: protokoly, merania, geometria, exporty a importy (bez UI, testovateľné v Node).
 - `src/app.js`, `src/index.html`: rozhranie.
 - `tools/build.py`: zostaví jeden `index.html` s vloženým kódom a `sw.js` s novou verziou cache.
-- `test/core.test.js` (`node test/core.test.js`): 22 testov jadra. Pakety DistoX, SAP6 a BRIC, ťahy a číslovanie staníc, rozvinutie, porovnanie s PocketTopo a Therionom.
-- `test/ui_test.py`: 53 testov rozhrania v Chrome s falošným DistoX2 a DistoX BLE (Playwright). Spúšťa sa `python3 test/ui_test.py <dist> <out>`. Cesta k vzorovému `Demo.txt` je v skripte.
+- `test/core.test.js` (`node test/core.test.js`): 23 testov jadra. Pakety DistoX, SAP6 a BRIC, ťahy a číslovanie staníc, rozvinutie, porovnanie s PocketTopo a Therionom.
+- `test/ui_test.py`: 58 testov rozhrania v Chrome s falošným DistoX2 a DistoX BLE (Playwright). Spúšťa sa `python3 test/ui_test.py <dist> <out>`. Cesta k vzorovému `Demo.txt` je v skripte.

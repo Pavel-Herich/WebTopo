@@ -32,7 +32,8 @@ MOCK = r"""
     drop() { this.ctrl.error(new Error('link lost')); }
   }
   window.__port = new FakePort();
-  Object.defineProperty(navigator, 'serial', { configurable: true, value: { requestPort: async () => window.__port, getPorts: async () => [window.__port] } });
+  window.__req = 0;
+  Object.defineProperty(navigator, 'serial', { configurable: true, value: { requestPort: async () => { window.__req++; return window.__port; }, getPorts: async () => (window.__granted ? [window.__port] : []) } });
 
   // ---- falošné BLE zariadenie (DistoX BLE / SAP6) ----
   class Chr extends EventTarget {
@@ -48,9 +49,10 @@ MOCK = r"""
     rx: new Chr('6e400002-b5a3-f393-e0a9-e50e24dcca9e', { write: true }),
     tx: new Chr('6e400003-b5a3-f393-e0a9-e50e24dcca9e', { notify: true })
   };
-  window.__bleDev = Object.assign(new EventTarget(), { name: 'DistoXBLE-1234' });
+  window.__bleDev = Object.assign(new EventTarget(), { name: 'DistoXBLE-1234', id: 'ble-1' });
   window.__bleDev.gatt = mk({ [NUS]: { '6e400002-b5a3-f393-e0a9-e50e24dcca9e': window.__ble.rx, '6e400003-b5a3-f393-e0a9-e50e24dcca9e': window.__ble.tx } });
-  Object.defineProperty(navigator, 'bluetooth', { configurable: true, value: { requestDevice: async () => window.__bleDev } });
+  window.__breq = 0;
+  Object.defineProperty(navigator, 'bluetooth', { configurable: true, value: { requestDevice: async () => { window.__breq++; return window.__bleDev; }, getDevices: async () => [window.__bleDev] } });
 
   // kódovanie DistoX paketu (ako ho posiela prístroj)
   window.__pkt = (d, a, i, seq) => {
@@ -87,6 +89,8 @@ with sync_playwright() as p:
     page.check('input[name=dt][value=distox2]')
     page.click('.sheet .btn.pri:has-text("Pripojiť")')
     page.wait_for_function("window.WTapp.dev && window.WTapp.dev.state === 'on'")
+    check('prvé pripojenie: výber prístroja raz', page.evaluate('__req') == 1)
+    page.evaluate('window.__granted = true')
     page.screenshot(path=f'{OUT}/02_pristroj.png')
     page.click('.sheet .x')
     check('DistoX2 pripojený (Web Serial)', page.locator('#devPill.on').count() == 1)
@@ -107,11 +111,11 @@ with sync_playwright() as p:
     page.wait_for_timeout(300)
     st = page.evaluate('(() => { const s = WTapp.survey; return { n: s.shots.length, legs: s.shots.filter(x => x.to).map(x => x.from + ">" + x.to), cur: s.cur, next: s.next, log: s.log.length }; })()')
     acks = page.evaluate('__port.acks')
-    check('ťahy rozpoznané z 3 zhodných meraní', st['legs'] == ['1.0>1.1', '1.1>1.2', '1.2>1.3'], st['legs'])
+    check('ťahy rozpoznané z 3 zhodných meraní', st['legs'] == ['1>2', '2>3', '3>4'], st['legs'])
     check('zámery ostali zámermi', st['n'] == 3 + 4, st['n'])
     check('opakovaný paket ignorovaný, všetko potvrdené', len(acks) == len(shots) + 1 and st['log'] == len(shots), (len(acks), st['log']))
     check('ACK so sekvenčným bitom', [a[0] for a in acks[:3]] == [0x55, 0xd5, 0x55], acks[:3])
-    check('aktuálna stanica 1.3 → 1.4', st['cur'] == '1.3' and st['next'] == '1.4', st)
+    check('aktuálna stanica 4 → 5', st['cur'] == '4' and st['next'] == '5', st)
     page.screenshot(path=f'{OUT}/03_data.png')
     check('posledné meranie v hornom pásiku', '4.19 m' in page.inner_text('#stHint'), page.inner_text('#stHint'))
 
@@ -121,6 +125,7 @@ with sync_playwright() as p:
     check('výpadok: čaká na prístroj', True)
     page.wait_for_function("WTapp.dev.state === 'on'", timeout=15000)
     check('znovu pripojené po výpadku', page.evaluate('__port.opens') >= 2, page.evaluate('__port.opens'))
+    check('po výpadku sa nepýta výber prístroja', page.evaluate('__req') == 1, page.evaluate('__req'))
     for k in range(3):
         page.evaluate(f'__port.push({json.dumps(page.evaluate(f"__pkt(2.5, 120, 5, {k % 2})"))})')
         page.wait_for_timeout(60)
@@ -134,7 +139,7 @@ with sync_playwright() as p:
     page.click('#tbody tr.leg >> nth=1 >> td.mn')
     page.wait_for_selector('.modal.compact')
     hdr = page.inner_text('.modal.compact .sh-h .ttl')
-    check('šípka otvorí menu bodu riadku', 'Bod 1.2' in hdr and 'z bodu 1.1' in hdr and page.locator('.modal.compact .mgrid').count() == 3, hdr.replace('\n', ' | '))
+    check('šípka otvorí menu bodu riadku', 'Bod 3' in hdr and 'z bodu 2' in hdr and page.locator('.modal.compact .mgrid').count() == 3, hdr.replace('\n', ' | '))
     page.screenshot(path=f'{OUT}/03b_menu_riadku.png')
     page.click('.modal.compact button[data-a=l1]')
     ext = page.evaluate("WTapp.survey.shots.filter(x => x.to)[1].ext")
@@ -147,6 +152,7 @@ with sync_playwright() as p:
     box = page.locator('#cvPlan').bounding_box()
     cx, cy = box['x'] + box['width'] / 2, box['y'] + box['height'] / 2
     check('náčrt: predvolene posun', page.locator('#tools [data-tool=pan].on').count() == 1)
+    check('náčrt: bez horných líšt', not page.locator('#top').is_visible() and not page.locator('#stBar').is_visible())
     s0 = page.evaluate('WTapp.planView().v.s')
     page.click('#tZin'); s1 = page.evaluate('WTapp.planView().v.s')
     page.click('#tZout'); page.click('#tZout'); s2 = page.evaluate('WTapp.planView().v.s')
@@ -173,24 +179,24 @@ with sync_playwright() as p:
     # --- ťuknutie na bod v náčrte: kontextové menu ---
     page.click('#tPen')
     n_before = page.evaluate('WTapp.survey.sketch.plan.length')
-    pos = page.evaluate("(() => { const v = WTapp.planView(), P = WTapp.geo.pos.get('1.3'), q = v.xy(P), r = v.cv.getBoundingClientRect(); return [r.left + v.sx(q[0]), r.top + v.sy(q[1])]; })()")
+    pos = page.evaluate("(() => { const v = WTapp.planView(), P = WTapp.geo.pos.get('4'), q = v.xy(P), r = v.cv.getBoundingClientRect(); return [r.left + v.sx(q[0]), r.top + v.sy(q[1])]; })()")
     page.mouse.click(pos[0] + 4, pos[1] - 3)
     page.wait_for_selector('.modal.compact')
     hdr = page.inner_text('.modal.compact .sh-h .ttl')
-    check('menu bodu: nadpis a „z bodu“', 'Bod 1.3' in hdr and 'z bodu 1.2' in hdr, hdr.replace('\n', ' | '))
+    check('menu bodu: nadpis a „z bodu“', 'Bod 4' in hdr and 'z bodu 3' in hdr, hdr.replace('\n', ' | '))
     check('menu bodu: dva riadky tlačidiel, bez Zavrieť', page.locator('.modal.compact .mgrid').count() == 2 and page.locator('.modal.compact .sh-f').count() == 0)
     check('ťuknutie perom na bod nič nenakreslí', page.evaluate('WTapp.survey.sketch.plan.length') == n_before)
     page.wait_for_timeout(300)
     page.screenshot(path=f'{OUT}/04b_menu_bodu.png')
     page.click('.modal.compact button[data-a=la]')
     exts = page.evaluate("WTapp.survey.shots.filter(x => x.to).map(x => x.from + '>' + x.to + ':' + x.ext)")
-    check('Všetko ‹ rozvinie ťah do bodu aj ďalej', exts == ['1.0>1.1:1', '1.1>1.2:-1', '1.2>1.3:-1', '1.3>1.4:-1'], exts)
+    check('Všetko ‹ rozvinie ťah do bodu aj ďalej', exts == ['1>2:1', '2>3:-1', '3>4:-1', '4>5:-1'], exts)
     page.mouse.click(pos[0] + 4, pos[1] - 3)
     page.wait_for_selector('.modal.compact')
     page.click('.modal.compact button[data-a=r1]')
     exts = page.evaluate("WTapp.survey.shots.filter(x => x.to).map(x => x.from + '>' + x.to + ':' + x.ext)")
-    check('Rozvinúť › len ťah do bodu', exts == ['1.0>1.1:1', '1.1>1.2:-1', '1.2>1.3:1', '1.3>1.4:-1'], exts)
-    check('ťuknutý bod je zvýraznený', page.evaluate('JSON.stringify(WTapp.sel)') == '{"t":"st","name":"1.3"}')
+    check('Rozvinúť › len ťah do bodu', exts == ['1>2:1', '2>3:-1', '3>4:1', '4>5:-1'], exts)
+    check('ťuknutý bod je zvýraznený', page.evaluate('JSON.stringify(WTapp.sel)') == '{"t":"st","name":"4"}')
     page.click('#tools [data-tool=pan]')
     page.evaluate("WTapp.planView().v.s = 400")
     page.click('#tCenter')
@@ -263,7 +269,7 @@ with sync_playwright() as p:
     names = z.namelist()
     check('export ZIP obsahuje .th, .th2, .xvi, .txt, .json', all(any(n.endswith(s) for n in names) for s in ('.th', '_p.th2', '_e.th2', '_p.xvi', '_e.xvi', '_pockettopo.txt', '.json')), names)
     th = z.read([n for n in names if n.endswith('.th')][0]).decode()
-    check('.th: ťahy, zámery a extend', '1.0 1.1 5.380' in th and ' - 1.850 ' in th and 'extend left' in th, th.splitlines()[5:9])
+    check('.th: ťahy, zámery a extend', '1 2 5.380' in th and ' - 1.850 ' in th and 'extend left' in th, th.splitlines()[5:9])
     open(f'{OUT}/export.th', 'w').write(th)
     page.click('.sheet .x')
 
@@ -313,6 +319,8 @@ with sync_playwright() as p:
     page.reload()
     page.wait_for_function("window.WTapp && WTapp.survey && WTapp.survey.name === 'Demo'")
     check('dáta ostanú po obnovení (IndexedDB)', page.evaluate('WTapp.survey.shots.length') == 51)
+    page.wait_for_function("WTapp.dev && WTapp.dev.state === 'on'", timeout=8000)
+    check('po spustení sa pripojí k poslednému prístroju bez výberu', page.evaluate('__breq') == 0 and page.evaluate('WTapp.dev.type') == 'distoxble')
     page.click('#btnMenu'); page.click('.sheet .btn:has-text("Prieskumy")')
     page.wait_for_timeout(300)
     n_sv = page.locator('.svrow').count()
@@ -330,12 +338,13 @@ with sync_playwright() as p:
     page.click('#tabs [data-v=vPlan]'); page.wait_for_timeout(300)
     tb, tl, cv = page.locator('#tabs').bounding_box(), page.locator('#tools').bounding_box(), page.locator('#cvPlan').bounding_box()
     check('na šírku: panely vpravo ako stĺpce', page.evaluate("document.body.classList.contains('land')") and tb['x'] > 840 and tb['height'] > tb['width'] and tl['x'] > 760 and tl['height'] > tl['width'] and cv['height'] > 250, (tb, tl, cv['height']))
-    check('na šírku: horné lišty ostávajú hore', page.locator('#top').bounding_box()['width'] > 900 and page.locator('#stBar').bounding_box()['y'] < 80)
+    check('na šírku: náčrt na celú výšku bez horných líšt', not page.locator('#top').is_visible() and cv['height'] > 380, cv['height'])
     page.click('#tPen'); page.click('#tPen'); page.wait_for_timeout(150)
     pb = page.locator('#palette').bounding_box()
     check('na šírku: farby vedľa panela', pb['x'] + pb['width'] <= tl['x'] + 1 and pb['y'] >= 0, pb)
     page.screenshot(path=f'{OUT}/13_sirka_podorys.png'); page.click('#tPen')
     page.click('#tabs [data-v=vData]'); page.wait_for_timeout(200); page.screenshot(path=f'{OUT}/14_sirka_data.png')
+    check('na šírku: v dátach horné lišty hore', page.locator('#top').bounding_box()['width'] > 800 and page.locator('#stBar').bounding_box()['y'] < 80)
     page.evaluate("Object.defineProperty(screen.orientation, 'angle', { configurable: true, get: () => 270 }); WTapp.orient()"); page.wait_for_timeout(200)
     tb = page.locator('#tabs').bounding_box()
     check('na šírku otočené na druhú stranu: panely vľavo', page.evaluate("document.body.classList.contains('land-l')") and tb['x'] < 20, tb)

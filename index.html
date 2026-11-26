@@ -8,7 +8,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon-192.png">
 <title>WebTopo</title>
-<meta name="build" content="20261126-1631">
+<meta name="build" content="20261126-1731">
 <style>
 :root{--bg:#0f1720;--panel:#17212b;--panel2:#1e2a36;--line:#2a3846;--text:#e9eef2;--muted:#8fa0ae;--acc:#4fc3f7;--pri:#0288d1;--ok:#66bb6a;--warn:#ffb74d;--bad:#e57373;--leg:#ffffff}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -107,6 +107,7 @@ body.land-l #palette{right:auto;left:100%;margin:0 0 0 6px}
 #btnUndoData{border:1px solid var(--line);background:var(--panel2)}
 #btnUndoData:disabled{opacity:.35}
 body.sketching #btnUndoData{display:none}
+body.sketching #top,body.sketching #stBar{display:none}
 #toast{position:fixed;left:50%;top:calc(8px + env(safe-area-inset-top));transform:translate(-50%,-12px);max-width:92vw;padding:10px 16px;border-radius:12px;background:#263238;color:#fff;font-weight:600;box-shadow:0 6px 24px #0008;opacity:0;pointer-events:none;transition:.2s;z-index:50;text-align:center}
 #toast.show{opacity:1;transform:translate(-50%,0)}
 #toast.ok{background:#2e7d32}#toast.bad{background:#c62828}
@@ -323,7 +324,7 @@ details summary{cursor:pointer;color:var(--muted);margin:10px 0 6px}
     return {
       v: 1, id: uid(), name: name || 'Prieskum', created: now, modified: now, date: isoDate(now),
       decl: 0, team: '', comment: '', fix: null,
-      start: '1.0', cur: '1.0', next: '1.1', ext: 1,
+      start: '1', cur: '1', next: '2', ext: 1,
       shots: [], sketch: { plan: [], elev: [] }, log: []
     };
   }
@@ -349,7 +350,7 @@ details summary{cursor:pointer;color:var(--muted);margin:10px 0 6px}
   // z inej stanice založí novú sériu (1.1 → 2.1), ak branch === 'series'.
   function suggestNext(s, cur, branch) {
     branch = branch || s.branch || 'series';
-    cur = cur || s.cur || '1.0';
+    cur = cur || s.cur || '1';
     const names = stationNames(s); names.add(cur);
     const p = splitName(cur);
     if (!p) { let k = 1; while (names.has(cur + k)) k++; return cur + k; }
@@ -834,7 +835,7 @@ details summary{cursor:pointer;color:var(--muted);margin:10px 0 6px}
 (() => {
   'use strict';
   const WT = window.WT, U = WT.UUID;
-  const APP_VERSION = '1.4';
+  const APP_VERSION = '1.5';
   const $ = s => document.querySelector(s);
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const num = v => parseFloat(String(v).trim().replace(',', '.'));
@@ -1040,21 +1041,28 @@ details summary{cursor:pointer;color:var(--muted);margin:10px 0 6px}
 
   class SerialDistoX extends BaseDev {
     async connect(user, opt) {
+      opt = opt || {};
       if (!hasSerial()) throw new Error('Prehliadač nemá Web Serial. Treba Chrome 138+ na Androide (nie iPhone).');
       this.stopped = false;
+      // prístroj, ktorý už bol raz povolený, sa pripojí bez okna výberu (Chrome si povolenie pamätá)
+      if (!this.port && !opt.choose && !opt.all) this.port = await this.granted();
       if (!this.port) {
-        if (user && opt && opt.all) this.port = await navigator.serial.requestPort();
-        else if (user) {
+        if (!user) throw new Error('Žiadny povolený prístroj');
+        if (opt.all) this.port = await navigator.serial.requestPort();
+        else {
           try { this.port = await navigator.serial.requestPort({ filters: [{ bluetoothServiceClassId: U.SPP }] }); }
           catch (e) { if (e && e.name === 'TypeError') this.port = await navigator.serial.requestPort(); else throw e; }
-        } else {
-          const ps = await navigator.serial.getPorts();
-          this.port = ps.find(p => String((p.getInfo && p.getInfo().bluetoothServiceClassId) || '').toLowerCase() === U.SPP) || ps[0];
-          if (!this.port) throw new Error('Žiadny povolený prístroj');
         }
       }
       this.name = 'DistoX';
+      this.fails = 0;
       this.open();
+    }
+    async granted() {
+      try {
+        const ps = await navigator.serial.getPorts();
+        return ps.find(p => String((p.getInfo && p.getInfo().bluetoothServiceClassId) || '').toLowerCase() === U.SPP) || (ps.length === 1 ? ps[0] : null);
+      } catch (e) { return null; }
     }
     async open() {
       if (this.stopped || this.opening || this.reader) return;
@@ -1063,9 +1071,15 @@ details summary{cursor:pointer;color:var(--muted);margin:10px 0 6px}
       this.setState('connecting', 'Pripájam…');
       try { await this.port.open({ baudRate: 9600 }); }
       catch (e) {
-        if (!(e && e.name === 'InvalidStateError')) { this.opening = false; this.log('Nedá sa pripojiť: ' + (e.message || e)); this.retry(); return; }
+        if (!(e && e.name === 'InvalidStateError')) {
+          this.opening = false; this.log('Nedá sa pripojiť: ' + (e.message || e));
+          // po viacerých neúspechoch obnoviť objekt portu z povolených (bez okna výberu)
+          if (++this.fails % 3 === 0) { const p = await this.granted(); if (p) this.port = p; }
+          this.retry(); return;
+        }
       }
-      this.opening = false;
+      this.opening = false; this.fails = 0;
+      S.devOK = true; saveSettings();
       this.log('Spojenie otvorené');
       this.setState('on', this.name);
       this.loop();
@@ -1123,12 +1137,19 @@ details summary{cursor:pointer;color:var(--muted);margin:10px 0 6px}
         default: return { acceptAllDevices: true, optionalServices: all };
       }
     }
-    async connect() {
+    async connect(user, opt) {
+      opt = opt || {};
       if (!hasBle()) throw new Error('Prehliadač nemá Web Bluetooth. Treba Chrome na Androide.');
       this.stopped = false;
+      if (!this.device && !opt.choose && S.bleId && navigator.bluetooth.getDevices) {
+        try { this.device = (await navigator.bluetooth.getDevices()).find(d => d.id === S.bleId) || null; } catch (e) { this.device = null; }
+        if (this.device) this.device.addEventListener('gattserverdisconnected', () => this.onDisc());
+      }
       if (!this.device) {
+        if (!user) throw new Error('Žiadny povolený prístroj');
         this.device = await navigator.bluetooth.requestDevice(this.options());
         this.device.addEventListener('gattserverdisconnected', () => this.onDisc());
+        S.bleId = this.device.id; saveSettings();
       }
       this.name = this.device.name || DEV_TYPES[this.type].label;
       try { await this.open(); } catch (e) { this.log('Pripojenie zlyhalo: ' + e.message); this.retry(); }
@@ -1193,6 +1214,7 @@ details summary{cursor:pointer;color:var(--muted);margin:10px 0 6px}
         const c = await this.svc(server, U.BRIC_CTRL);
         this.wr = c ? await c.getCharacteristic(U.BRIC_CTRL_CHR) : null;
       }
+      S.devOK = true; saveSettings();
       this.log('Pripojené: ' + this.name + ' (' + kind + ')');
       this.setState('on', this.name);
     }
@@ -1857,26 +1879,29 @@ details summary{cursor:pointer;color:var(--muted);margin:10px 0 6px}
       '<div class="row gap"><button class="btn" id="dLon">Laser zap.</button><button class="btn" id="dLoff">Laser vyp.</button><button class="btn" id="dShot">Meraj</button><button class="btn" id="dSimAuto">Sim. auto</button></div>' +
       '<details><summary>Denník komunikácie</summary><pre id="devLog" class="log"></pre></details>';
     const m = modal('Prístroj', body, [
-      { label: 'Odpojiť', onClick: async () => { if (dev) await dev.disconnect(); return false; } },
-      { label: 'Pripojiť', cls: 'pri', onClick: async el => {
+      { label: 'Odpojiť', onClick: async () => { S.devOK = false; saveSettings(); if (dev) await dev.disconnect(); return false; } },
+      { label: 'Iný prístroj', onClick: el => connectFrom(el, true) },
+      { label: 'Pripojiť', cls: 'pri', onClick: el => connectFrom(el, false) }
+    ]);
+    async function connectFrom(el, choose) {
         const type = (el.querySelector('input[name=dt]:checked') || {}).value || 'distox2';
         S.devType = type; S.autoRe = el.querySelector('#dAuto').checked; saveSettings();
-        if (dev && (dev.type !== type || dev.state === 'off')) { try { await dev.disconnect(); } catch (e) { /* */ } dev = null; }
-        if (!dev) dev = makeDev(type);
-        try { await dev.connect(true, { all: el.querySelector('#dAll').checked }); }
+        if (dev && (choose || dev.type !== type || dev.state === 'off')) { try { await dev.disconnect(); } catch (e) { /* */ } dev = null; }
+        if (dev && dev.state !== 'off') { renderDev(); return false; }
+        dev = makeDev(type);
+        try { await dev.connect(true, { all: el.querySelector('#dAll').checked, choose }); }
         catch (e) {
           if (e && e.name === 'NotFoundError') { toast('Nevybral si žiadne zariadenie'); dev = null; renderDev(); return false; }
           dev = null; renderDev(); throw e;
         }
         renderDev(); return false;
-      } }
-    ]);
+    }
     const el = m.el;
     const note = () => {
       const type = (el.querySelector('input[name=dt]:checked') || {}).value;
       const n = {
-        distox2: 'DistoX najprv spáruj v Nastaveniach Androidu → Bluetooth (PIN 0000). Potom Pripojiť a vyber ho zo zoznamu.',
-        distoxble: 'Nespárovať v systéme – stačí zapnúť Bluetooth na DistoX a vybrať ho zo zoznamu.',
+        distox2: 'DistoX najprv spáruj v Nastaveniach Androidu → Bluetooth (PIN 0000). Prvýkrát ho vyberieš zo zoznamu, potom sa appka pripája sama, aj po spustení. „Iný prístroj“ = nový výber.',
+        distoxble: 'Nepárovať v systéme – stačí zapnúť Bluetooth na DistoX a prvýkrát ho vybrať zo zoznamu, potom sa pripája sám.',
         bric: 'BRIC posiela merania s indexom – opakované merania po pripojení sa ignorujú.',
         auto: 'Zobrazí všetky BLE zariadenia v okolí; protokol sa zistí podľa služieb.',
         sim: 'Simulátor generuje merania ako skutočný prístroj (zámery + 3 zhodné merania = ťah).'
@@ -1955,10 +1980,10 @@ details summary{cursor:pointer;color:var(--muted);margin:10px 0 6px}
   }
   function newSurveyDialog() {
     modal('Nový prieskum', '<label>Názov<input id="nName" autofocus value="Prieskum ' + WT.isoDate(Date.now()) + '"></label>' +
-      '<label>Prvá stanica<input id="nSt" autocapitalize="off" value="1.0"></label>', [
+      '<label>Prvá stanica<input id="nSt" autocapitalize="off" value="1"></label>', [
       { label: 'Zrušiť' },
       { label: 'Vytvoriť', cls: 'pri', onClick: async el => {
-        const st = el.querySelector('#nSt').value.trim() || '1.0';
+        const st = el.querySelector('#nSt').value.trim() || '1';
         if (!validName(st)) throw new Error('Neplatný názov stanice');
         const s = WT.newSurvey(el.querySelector('#nName').value.trim() || 'Prieskum');
         WT.setCurrent(s, st);
@@ -2064,9 +2089,9 @@ details summary{cursor:pointer;color:var(--muted);margin:10px 0 6px}
 
   function helpDialog() {
     modal('Ako to funguje', '<div class="help">' +
-      '<p><b>Pripojenie.</b> Ťukni na <i>Pripojiť</i> vpravo hore. DistoX2 najprv spáruj v systéme (PIN 0000), BLE prístroje nie. Funguje v Chrome na Androide; iPhone nemá Web Serial ani Web Bluetooth.</p>' +
+      '<p><b>Pripojenie.</b> Ťukni na <i>Pripojiť</i> vpravo hore. DistoX2 najprv spáruj v systéme (PIN 0000), BLE prístroje nie. Prístroj vyberieš len prvýkrát; po výpadku aj po spustení appky sa pripája sám. Funguje v Chrome na Androide; iPhone nemá Web Serial ani Web Bluetooth.</p>' +
       '<p><b>Meranie.</b> Každé meranie je zámer z aktuálnej stanice (Od). Tri zhodné merania za sebou (±5 cm, ±1,7°) sa spoja do ťahu Od → Do a aktuálnou stanicou sa stane Do. Štvrté zhodné meranie ťah len spresní.</p>' +
-      '<p><b>Stanice.</b> Ťukni na pásik „Od → Do“: nastavíš, odkiaľ pokračuješ, a názov ďalšej stanice. Z inej ako poslednej stanice začne nová séria (1.3 → 2.1).</p>' +
+      '<p><b>Stanice.</b> Nový prieskum začína bodom 1, ďalej 2, 3… Ťukni na pásik „Od → Do“: nastavíš, odkiaľ pokračuješ, a názov ďalšej stanice. Odbočka zo staršej stanice dostane ďalšie voľné číslo; pri názvoch so sériou (1.3) začne novú sériu (2.1).</p>' +
       '<p><b>Tabuľka.</b> Ťuknutie na riadok ho označí (aj v náčrte). Šípka ▸ pred riadkom otvorí menu bodu: otočiť ťah, rozvinúť, pokračovať, premenovať, upraviť, rozdeliť, vymazať. Dvojklik alebo dlhé podržanie na hodnote ju priamo upraví (na ‹ › prepne smer v reze). Posledný riadok je nové meranie ručne z aktuálnej stanice: Do (prázdne = zámer), dĺžka, azimut, sklon, Enter alebo +. Ikona ↶ vráti posledný krok v dátach.</p>' +
       '<p><b>Náčrt.</b> Pôdorys a rozvinutý rez. Predvolene posun: jedným prstom posúvaš, dvoma zväčšuješ, + a − priblížia a oddialia. Pero s farbami kreslí, guma maže celé čiary, ↶ vráti krok. Ťuknutím na bod otvoríš jeho menu. ⌖ dá aktívny bod do stredu a ukáže celý jeho polygón. Čiary sú ukotvené k najbližšej stanici, takže pri oprave dát sa posunú s ňou.</p>' +
       '<p><b>Therion.</b> Export → Balík pre Therion: .th, .th2 s vloženým .xvi podkladom pre xtherion a PocketTopo .txt (xtherion ho importuje ako doteraz). Import vie načítať PocketTopo .txt aj zálohu .json.</p>' +
@@ -2221,6 +2246,10 @@ details summary{cursor:pointer;color:var(--muted);margin:10px 0 6px}
     const isNew = !s;
     if (!s) s = WT.newSurvey('Prieskum ' + WT.isoDate(Date.now()));
     await openSurvey(s, isNew);
+    if (S.devOK && DEV_TYPES[S.devType] && DEV_TYPES[S.devType].api !== 'none') {
+      dev = makeDev(S.devType);
+      dev.connect(false).then(renderDev).catch(() => { dev = null; renderDev(); });
+    }
     if ('serviceWorker' in navigator && (location.protocol === 'https:' || /^(localhost|127\.0\.0\.1)$/.test(location.hostname))) {
       navigator.serviceWorker.register('sw.js').catch(() => {});
     }

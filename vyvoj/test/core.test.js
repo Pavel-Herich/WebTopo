@@ -67,9 +67,9 @@ ok('Ťah z 3 zhodných meraní + číslovanie staníc', () => {
   WT.addMeasurement(s, { d: 5.02, a: 10.5, i: -3.3 });
   r = WT.addMeasurement(s, { d: 4.99, a: 9.6, i: -2.8 });
   assert.strictEqual(r.kind, 'leg');
-  assert.strictEqual(r.shot.from, '1.0'); assert.strictEqual(r.shot.to, '1.1');
+  assert.strictEqual(r.shot.from, '1'); assert.strictEqual(r.shot.to, '2');
   near(r.shot.d, 5.003, 0.001); near(r.shot.a, 10.03, 0.05);
-  assert.strictEqual(s.cur, '1.1'); assert.strictEqual(s.next, '1.2');
+  assert.strictEqual(s.cur, '2'); assert.strictEqual(s.next, '3');
   assert.strictEqual(s.shots.length, 3); // 2 zámery + ťah
   // 4. opakovanie sa pripojí k ťahu
   r = WT.addMeasurement(s, { d: 5.01, a: 10.2, i: -3.1 });
@@ -88,8 +88,17 @@ ok('Ťah cez sever (359°/1°) a zvislý ťah', () => {
   const r2 = WT.addMeasurement(s, { d: 10.01, a: 120, i: -89.7 });
   assert.strictEqual(r2.kind, 'leg', 'zvislé merania s rôznym azimutom sú zhodné');
 });
+ok('Predvolene čísla 1, 2, 3…; odbočka pokračuje ďalším voľným číslom', () => {
+  const s = WT.newSurvey('t');
+  assert.strictEqual(s.cur, '1'); assert.strictEqual(s.next, '2');
+  for (const leg of [[5, 10, 0], [4, 50, 0], [3, 90, 0]]) for (let k = 0; k < 3; k++) WT.addMeasurement(s, { d: leg[0], a: leg[1], i: leg[2] });
+  assert.deepStrictEqual(s.shots.map(x => x.from + '>' + x.to), ['1>2', '2>3', '3>4']);
+  WT.setCurrent(s, '2');
+  assert.strictEqual(s.next, '5');
+});
 ok('Odbočka zo staršej stanice = nová séria; pokračovanie série', () => {
   const s = WT.newSurvey('t');
+  WT.setCurrent(s, '1.0');
   for (const leg of [[5, 10, 0], [4, 50, 0], [3, 90, 0]]) for (let k = 0; k < 3; k++) WT.addMeasurement(s, { d: leg[0], a: leg[1], i: leg[2] });
   assert.strictEqual(s.cur, '1.3');
   WT.setCurrent(s, '1.1');
@@ -102,15 +111,15 @@ ok('Mazanie, otočenie, rozdelenie ťahu, premenovanie', () => {
   for (let k = 0; k < 3; k++) WT.addMeasurement(s, { d: 5, a: 10, i: 0 });
   const leg = s.shots[0];
   WT.splitLeg(s, leg.id);
-  assert.strictEqual(s.shots.length, 3); assert.strictEqual(s.cur, '1.0');
+  assert.strictEqual(s.shots.length, 3); assert.strictEqual(s.cur, '1');
   WT.makeLeg(s, s.shots[2].id);
-  assert.strictEqual(s.shots[2].to, '1.1'); assert.strictEqual(s.cur, '1.1');
+  assert.strictEqual(s.shots[2].to, '2'); assert.strictEqual(s.cur, '2');
   WT.reverseShot(s, s.shots[2].id);
-  assert.strictEqual(s.shots[2].from, '1.1');
-  WT.renameStation(s, '1.1', 'X1');
+  assert.strictEqual(s.shots[2].from, '2');
+  WT.renameStation(s, '2', 'X1');
   assert.strictEqual(s.shots[2].from, 'X1'); assert.strictEqual(s.cur, 'X1');
   WT.deleteShot(s, s.shots[2].id);
-  assert.strictEqual(s.cur, '1.0');
+  assert.strictEqual(s.cur, '1');
 });
 
 // ---------- porovnanie so vzorovým exportom PocketTopo z testov Therionu ----------

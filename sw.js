@@ -1,5 +1,5 @@
 // WebTopo – offline cache. Pri novej verzii zmeň VERSION.
-const VERSION = 'webtopo-20261126-1631';
+const VERSION = 'webtopo-20261126-1731';
 const FILES = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png', './icon-maskable-512.png'];
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(VERSION).then(c => c.addAll(FILES)).then(() => self.skipWaiting()));

@@ -123,7 +123,7 @@
     return {
       v: 1, id: uid(), name: name || 'Prieskum', created: now, modified: now, date: isoDate(now),
       decl: 0, team: '', comment: '', fix: null,
-      start: '1.0', cur: '1.0', next: '1.1', ext: 1,
+      start: '1', cur: '1', next: '2', ext: 1,
       shots: [], sketch: { plan: [], elev: [] }, log: []
     };
   }
@@ -149,7 +149,7 @@
   // z inej stanice založí novú sériu (1.1 → 2.1), ak branch === 'series'.
   function suggestNext(s, cur, branch) {
     branch = branch || s.branch || 'series';
-    cur = cur || s.cur || '1.0';
+    cur = cur || s.cur || '1';
     const names = stationNames(s); names.add(cur);
     const p = splitName(cur);
     if (!p) { let k = 1; while (names.has(cur + k)) k++; return cur + k; }
