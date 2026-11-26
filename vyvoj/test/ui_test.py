@@ -132,6 +132,7 @@ with sync_playwright() as p:
     page.click('.sheet .btn:has-text("Rez:")')
     ext = page.evaluate("WTapp.survey.shots.filter(x => x.to)[1].ext")
     check('zmena extend cez menu riadku', ext == -1, ext)
+    check('kliknutý riadok ostane zvýraznený', page.locator('#tbody tr.sel').count() == 1 and page.locator('#tbody tr.leg >> nth=1').get_attribute('class').find('sel') >= 0)
 
     # --- náčrt: pôdorys ---
     page.click('#tabs [data-v=vPlan]')
@@ -177,6 +178,16 @@ with sync_playwright() as p:
     page.click('.modal.compact button[data-a=r1]')
     exts = page.evaluate("WTapp.survey.shots.filter(x => x.to).map(x => x.from + '>' + x.to + ':' + x.ext)")
     check('Rozvinúť › len ťah do bodu', exts == ['1.0>1.1:1', '1.1>1.2:-1', '1.2>1.3:1', '1.3>1.4:-1'], exts)
+    check('ťuknutý bod je zvýraznený', page.evaluate('JSON.stringify(WTapp.sel)') == '{"t":"st","name":"1.3"}')
+    page.click('#tools [data-tool=pan]')
+    page.evaluate("WTapp.planView().v.s = 400")
+    page.click('#tCenter')
+    page.wait_for_timeout(250)
+    r = page.evaluate("""(() => { const v = WTapp.planView(), g = WTapp.geo, P = g.pos.get(WTapp.survey.cur), q = v.xy(P);
+        const pts = [...g.pos.values()].filter(Q => Q.comp === P.comp).map(Q => { const r = v.xy(Q); return [v.sx(r[0]), v.sy(r[1])]; });
+        return { c: [v.sx(q[0]) - v.W / 2, v.sy(q[1]) - v.H / 2], inside: pts.every(p => p[0] >= 0 && p[0] <= v.W && p[1] >= 0 && p[1] <= v.H), s: v.v.s }; })()""")
+    check('terčík: aktívny bod v strede a celý polygón na obrazovke', abs(r['c'][0]) < 1 and abs(r['c'][1]) < 1 and r['inside'] and r['s'] < 400, r)
+    page.screenshot(path=f'{OUT}/04d_tercik.png')
     # --- okno nad klávesnicou ---
     page.click('#tabs [data-v=vData]')
     page.click('#stChip')

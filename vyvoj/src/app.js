@@ -2,7 +2,7 @@
 (() => {
   'use strict';
   const WT = window.WT, U = WT.UUID;
-  const APP_VERSION = '1.1';
+  const APP_VERSION = '1.2';
   const $ = s => document.querySelector(s);
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const num = v => parseFloat(String(v).trim().replace(',', '.'));
@@ -48,6 +48,8 @@
 
   // ---------------- stav ----------------
   let sv = null, geo = null, flashId = null, curView = 'vData', dev = null, persistAsked = false;
+  let sel = null;   // zvýraznený bod {t:'st', name} alebo riadok {t:'sh', id}
+  function select(x) { sel = x; renderTable(); planView.requestRender(); elevView.requestRender(); }
   let saveT = 0, saving = Promise.resolve();
   const devLogLines = [];
 
@@ -464,7 +466,8 @@
   }
   function rowHTML(sh) {
     const leg = !!sh.to;
-    const cls = (leg ? 'leg' : 'splay') + (sh.id === flashId ? ' new' : '') + ((sh.to || sh.from) === sv.cur && leg ? ' cur' : '');
+    const isSel = sel && (sel.t === 'sh' ? sel.id === sh.id : (leg && sh.to === sel.name));
+    const cls = (leg ? 'leg' : 'splay') + (sh.id === flashId ? ' new' : '') + ((sh.to || sh.from) === sv.cur && leg ? ' cur' : '') + (isSel ? ' sel' : '');
     return '<tr class="' + cls + '" data-id="' + sh.id + '"><td class="st">' + esc(sh.from) + '</td><td class="st">' + (leg ? esc(sh.to) : '–') +
       (sh.c ? '<span class="cm">✎</span>' : '') + '</td><td>' + WT.fmt(sh.d, 2) + '</td><td>' + WT.fmt(+WT.fmtAz(sh.a), 1) + '</td><td>' + WT.fmt(sh.i, 1) +
       '</td><td class="ex">' + (leg ? (sh.ext >= 0 ? '›' : '‹') : '') + '</td></tr>';
@@ -521,7 +524,18 @@
     center() {
       const P = geo && geo.pos.get(sv.cur);
       if (!P) return this.fit();
-      const q = this.xy(P); this.v.cx = q[0]; this.v.cy = q[1]; this.requestRender();
+      const q = this.xy(P);
+      let mx = 0, my = 0;
+      for (const [, Q] of geo.pos) {
+        if (Q.comp !== P.comp) continue;
+        const r = this.xy(Q);
+        mx = Math.max(mx, Math.abs(r[0] - q[0])); my = Math.max(my, Math.abs(r[1] - q[1]));
+      }
+      const m = 34, fx = mx > 1e-6 ? (this.W / 2 - m) / mx : Infinity, fy = my > 1e-6 ? (this.H / 2 - m) / my : Infinity;
+      let s = Math.min(fx, fy);
+      if (!isFinite(s)) s = Math.max(this.v.s, 20);
+      this.v = { cx: q[0], cy: q[1], s: Math.max(0.5, Math.min(400, s)) };
+      this.requestRender();
     }
     follow() {
       if (!this.v || !geo) return;
@@ -543,14 +557,16 @@
       const c = this.ctx, dpr = this.dpr || 1, W = this.W, H = this.H, s = this.v.s;
       c.setTransform(dpr, 0, 0, dpr, 0, 0);
       c.fillStyle = '#fbfaf5'; c.fillRect(0, 0, W, H);
-      // mriežka
+      // mriežka: vždy 1 m (pri veľkom oddialení slabne, pod 3 px na meter sa nekreslí)
       const steps = [0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000];
-      const g = steps.find(x => x * s >= 32) || 1000;
-      const [mx0, my1] = this.toModel(0, 0), [mx1, my0] = this.toModel(W, H);
-      c.lineWidth = 1; c.strokeStyle = '#e6e1d3'; c.beginPath();
-      for (let x = Math.floor(mx0 / g) * g; x <= mx1; x += g) { const X = Math.round(this.sx(x)) + 0.5; c.moveTo(X, 0); c.lineTo(X, H); }
-      for (let y = Math.floor(my0 / g) * g; y <= my1; y += g) { const Y = Math.round(this.sy(y)) + 0.5; c.moveTo(0, Y); c.lineTo(W, Y); }
-      c.stroke();
+      if (s >= 3) {
+        const [mx0, my1] = this.toModel(0, 0), [mx1, my0] = this.toModel(W, H);
+        c.globalAlpha = s < 10 ? (s - 3) / 7 : 1;
+        c.lineWidth = 1; c.strokeStyle = '#e6e1d3'; c.beginPath();
+        for (let x = Math.floor(mx0); x <= mx1; x += 1) { const X = Math.round(this.sx(x)) + 0.5; c.moveTo(X, 0); c.lineTo(X, H); }
+        for (let y = Math.floor(my0); y <= my1; y += 1) { const Y = Math.round(this.sy(y)) + 0.5; c.moveTo(0, Y); c.lineTo(W, Y); }
+        c.stroke(); c.globalAlpha = 1;
+      }
       if (!geo) return;
       const key = this.proj === 'plan' ? 'p' : 'e';
       // zámery
@@ -563,6 +579,11 @@
       c.lineCap = 'round'; c.lineJoin = 'round';
       for (const st of sv.sketch[this.proj]) this.drawStroke(WT.strokeAbs(st, geo, this.proj), st.col, st.w);
       if (this.stroke) this.drawStroke(this.stroke.pts, this.col, S.pen);
+      // vybraný riadok tabuľky
+      if (sel && sel.t === 'sh') {
+        const sg = geo.segs.find(x => x.id === sel.id);
+        if (sg) { const q = sg[key]; c.strokeStyle = 'rgba(2,136,209,.28)'; c.lineWidth = 9; c.beginPath(); c.moveTo(this.sx(q[0]), this.sy(q[1])); c.lineTo(this.sx(q[2]), this.sy(q[3])); c.stroke(); }
+      }
       // ťahy
       c.strokeStyle = '#b3261e'; c.lineWidth = 2.2; c.beginPath();
       for (const sg of geo.segs) if (sg.kind === 'leg') { const q = sg[key]; c.moveTo(this.sx(q[0]), this.sy(q[1])); c.lineTo(this.sx(q[2]), this.sy(q[3])); }
@@ -574,6 +595,10 @@
         const q = this.xy(P), X = this.sx(q[0]), Y = this.sy(q[1]);
         if (X < -40 || Y < -40 || X > W + 40 || Y > H + 40) continue;
         const isCur = name === sv.cur;
+        if (sel && sel.t === 'st' && sel.name === name) {
+          c.fillStyle = 'rgba(2,136,209,.16)'; c.strokeStyle = 'rgba(2,136,209,.55)'; c.lineWidth = 1.5;
+          c.beginPath(); c.arc(X, Y, 14, 0, Math.PI * 2); c.fill(); c.stroke();
+        }
         c.fillStyle = isCur ? '#0277bd' : '#b3261e';
         c.beginPath(); c.arc(X, Y, isCur ? 4.5 : 3, 0, Math.PI * 2); c.fill();
         if (isCur) { c.strokeStyle = '#0277bd'; c.lineWidth = 2; c.beginPath(); c.arc(X, Y, 10, 0, Math.PI * 2); c.stroke(); }
@@ -591,9 +616,9 @@
       c.fillStyle = '#37474f'; c.fillRect(12, H - 18, bw, 4);
       c.font = '12px system-ui, sans-serif'; c.fillText(bar + ' m', 12, H - 28);
       if (this.proj === 'plan') {
-        c.save(); c.translate(W - 26, 34); c.fillStyle = '#37474f';
-        c.beginPath(); c.moveTo(0, -16); c.lineTo(7, 8); c.lineTo(0, 3); c.lineTo(-7, 8); c.closePath(); c.fill();
-        c.font = '700 11px system-ui, sans-serif'; c.textAlign = 'center'; c.fillText('S', 0, 20); c.restore(); c.textAlign = 'left';
+        c.save(); c.translate(W - 22, 28); c.fillStyle = '#37474f';
+        c.beginPath(); c.moveTo(0, -12); c.lineTo(5.5, 6); c.lineTo(0, 2.5); c.lineTo(-5.5, 6); c.closePath(); c.fill();
+        c.font = '700 10px system-ui, sans-serif'; c.textAlign = 'center'; c.fillText('S', 0, 16); c.restore(); c.textAlign = 'left';
       } else {
         c.fillStyle = '#607d8b'; c.font = '11px system-ui, sans-serif'; c.fillText('rozvinutý rez', W - 88, 18);
       }
@@ -670,7 +695,8 @@
       }
       this.tap = null; this.blocked = false;
       this.requestRender();
-      if (hit) stationMenu(hit);
+      if (hit) { select({ t: 'st', name: hit }); stationMenu(hit); }
+      else if (tap && sel) select(null);
     }
     commitStroke() {
       const st = this.stroke; if (!st || st.pts.length < 2) return;
@@ -992,7 +1018,7 @@
     geo = WT.compute(sv);
     try { localStorage.setItem('wt.last', sv.id); } catch (e) { /* */ }
     if (isNew) await save(true);
-    planView.undo = []; elevView.undo = [];
+    planView.undo = []; elevView.undo = []; sel = null;
     planView.v = null; elevView.v = null;
     planView.resize(); elevView.resize();
     renderAll(); scrollTableEnd();
@@ -1168,7 +1194,7 @@
     $('#stChip').onclick = stationDialog;
     $('#tbody').addEventListener('click', e => {
       const tr = e.target.closest('tr'); if (!tr) return;
-      const sh = sv.shots.find(x => x.id === tr.dataset.id); if (sh) shotMenu(sh);
+      const sh = sv.shots.find(x => x.id === tr.dataset.id); if (sh) { select({ t: 'sh', id: sh.id }); shotMenu(sh); }
     });
     $('#emptyDev').onclick = deviceDialog;
     $('#emptyMan').onclick = manualDialog;
@@ -1197,7 +1223,7 @@
     if ('serviceWorker' in navigator && (location.protocol === 'https:' || /^(localhost|127\.0\.0\.1)$/.test(location.hostname))) {
       navigator.serviceWorker.register('sw.js').catch(() => {});
     }
-    window.WTapp = { get survey() { return sv; }, get geo() { return geo; }, onMeasurement, showView, get dev() { return dev; }, planView: () => planView, elevView: () => elevView };
+    window.WTapp = { get survey() { return sv; }, get geo() { return geo; }, get sel() { return sel; }, onMeasurement, showView, get dev() { return dev; }, planView: () => planView, elevView: () => elevView };
   }
   start();
 })();

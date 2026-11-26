@@ -13,17 +13,17 @@
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font:15px/1.35 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;overscroll-behavior:none}
 button{font:inherit;color:inherit}
-svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 #app{position:fixed;inset:0;display:flex;flex-direction:column}
 #top{display:flex;align-items:center;gap:8px;padding:6px 8px;padding-top:calc(6px + env(safe-area-inset-top));background:var(--panel);border-bottom:1px solid var(--line)}
-.ico{width:42px;height:42px;border:0;border-radius:10px;background:transparent;display:grid;place-items:center}
+.ico{width:38px;height:38px;border:0;border-radius:10px;background:transparent;display:grid;place-items:center}
 .ico:active{background:var(--panel2)}
 #title{flex:1;min-width:0}
 #svName{font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #svStats{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .pill{display:flex;align-items:center;gap:7px;max-width:46vw;height:36px;padding:0 12px;border-radius:18px;border:1px solid var(--line);background:var(--panel2);font-size:13px;font-weight:600}
 .pill span:last-child{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.pill .dot{width:10px;height:10px;border-radius:50%;background:#607d8b;flex:none}
+.pill .dot{width:9px;height:9px;border-radius:50%;background:#607d8b;flex:none}
 .pill.on .dot{background:var(--ok);box-shadow:0 0 8px var(--ok)}
 .pill.connecting .dot,.pill.wait .dot{background:var(--warn);animation:blink 1s infinite}
 @keyframes blink{50%{opacity:.25}}
@@ -47,6 +47,8 @@ tr.splay td{color:var(--muted);font-weight:400}
 tr.leg td{color:var(--leg)}
 tr.leg td:nth-child(3),tr.leg td:nth-child(4),tr.leg td:nth-child(5){font-weight:600}
 tr.cur td.st{color:#b3e5fc}
+tr.sel td{background:rgba(79,195,247,.13)}
+tr.sel td:first-child{box-shadow:inset 3px 0 0 var(--acc)}
 tr.new{animation:flash 1.6s ease-out}
 @keyframes flash{0%{background:#2e7d32}100%{background:transparent}}
 tr:active{background:var(--panel2)}
@@ -58,11 +60,11 @@ body[data-font=l] td{padding:12px 6px;font-size:18px}
 canvas{display:block;touch-action:none;background:#fbfaf5}
 #tools{display:none;position:relative;z-index:5;gap:6px;padding:6px 8px;background:var(--panel);border-top:1px solid var(--line);justify-content:space-between}
 body.sketching #tools{display:flex}
-.tb{flex:none;width:46px;height:44px;border-radius:10px;border:1px solid var(--line);background:var(--panel2);display:grid;place-items:center;color:var(--text)}
+.tb{flex:none;width:40px;height:38px;border-radius:10px;border:1px solid var(--line);background:var(--panel2);display:grid;place-items:center;color:var(--text)}
 .tb.on{border-color:var(--acc);box-shadow:inset 0 0 0 2px var(--acc)}
-.tb.col i{width:22px;height:22px;border-radius:50%;background:var(--c);border:2px solid #fff4}
+.tb.col i{width:18px;height:18px;border-radius:50%;background:var(--c);border:2px solid #fff4}
 .tb.pen{position:relative}
-.tb.pen span{position:absolute;right:4px;top:2px;font-size:10px;color:var(--muted)}
+.tb.pen span{position:absolute;right:3px;top:1px;font-size:9px;color:var(--muted)}
 #palette{position:absolute;left:8px;bottom:100%;margin-bottom:6px;display:flex;flex-wrap:wrap;gap:6px;padding:8px;background:var(--panel);border:1px solid var(--line);border-radius:12px;box-shadow:0 8px 24px #000a}
 #palette[hidden]{display:none}
 #stHint b{color:var(--text);font-weight:600}
@@ -81,7 +83,7 @@ body.sketching #tools{display:flex}
 @media (min-width:700px){.modal{align-items:center}.sheet{border-radius:16px}}
 .sh-h{display:flex;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid var(--line)}
 .sh-h .ttl{flex:1;min-width:0}.sh-h b{display:block;font-size:16px}.sh-h small{display:block;color:var(--muted);font-size:12.5px;margin-top:1px}
-.x{width:36px;height:36px;border:0;border-radius:8px;background:transparent;color:var(--muted);font-size:18px}
+.x{width:32px;height:32px;border:0;border-radius:8px;background:transparent;color:var(--muted);font-size:16px}
 .sh-b{padding:12px 14px;overflow:auto;flex:1 1 auto;min-height:0;overscroll-behavior:contain}
 .sh-h,.sh-f{flex:none}
 .compact .sh-h{padding:9px 12px}.compact .sh-b{padding:8px 10px 12px}
