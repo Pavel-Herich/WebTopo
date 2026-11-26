@@ -35,8 +35,13 @@ Každý paket sa potvrdí (ACK). Ak spojenie vypadne, appka sa skúša znovu pri
 
 - **Od → Do** (pásik hore): aktuálna stanica a názov ďalšej. Ťuknutím ich zmeníš. Z inej ako poslednej stanice začne nová séria (1.3 → 2.1), dá sa to prepnúť v Nastaveniach.
 - Každé meranie je zámer z aktuálnej stanice. **3 zhodné merania** (±5 cm, ±1,7°) = ťah a aktuálnou stanicou sa stane Do. Štvrté zhodné meranie ťah len spresní. Tolerancie a počet meraní (2/3/vypnuté) sú v Nastaveniach.
-- **Ťuknutie na riadok:** úprava, smer v reze ‹ ›, otočenie ťahu (spätný zámer), rozdelenie ťahu na zámery, „pokračovať z“, vymazanie.
-- **Náčrt:** jeden prst kreslí, dva prsty posúvajú a zväčšujú. Farby sú pod tlačidlom pera. ✋ posúva. Guma maže celé čiary, ↶ vráti krok.
+- **Tabuľka:**
+  - Ťuknutie na riadok ho označí, aj v náčrte.
+  - Šípka ▸ pred riadkom otvorí menu bodu: otočiť ťah, rozvinúť ‹ ›, pokračovať, premenovať, upraviť, rozdeliť, vymazať.
+  - Dvojklik alebo dlhé podržanie na hodnote ju priamo upraví; na ‹ › prepne smer v reze.
+  - **Posledný riadok** je nové meranie ručne z aktuálnej stanice: Do (prázdne = zámer), dĺžka, azimut, sklon a potom Enter alebo +.
+  - ↶ pri pásiku Od → Do vráti posledný krok v dátach (meranie, úpravu, mazanie, zmenu staníc).
+- **Náčrt:** predvolene posun, dva prsty zväčšujú, + a − priblížia a oddialia. Pero (prvé ťuknutie zapne pero, druhé otvorí farby) kreslí. Guma maže celé čiary, ↶ vráti krok.
 - **⌖** dá aktívny (posledne pridaný) bod do stredu a priblíži tak, aby bol na obrazovke celý jeho polygón. Mriežka je vždy 1 m; pri veľkom oddialení slabne a pod 3 px na meter sa nekreslí.
 - Ťuknutý bod v náčrte aj kliknutý riadok tabuľky ostanú jemne zvýraznené. Vybraný riadok je zvýraznený aj v náčrte.
 - **Ťuknutie na bod v náčrte** otvorí jeho menu: hore „Bod X“ a pod ním „z bodu Y“. Tlačidlá sú v dvoch riadkoch: otočiť ťah Y – X, pokračovať z X, premenovať a rozvinúť ‹ / › len ťah do bodu alebo všetko odtiaľ ďalej (smerom od počiatku). Čiary sú ukotvené k najbližšej stanici, takže sa pri oprave dát posunú s ňou.
@@ -61,4 +66,4 @@ Overenie: z importovaného vzorového súboru PocketTopo (Therion test `pocket-t
 - `src/app.js`, `src/index.html`: rozhranie.
 - `tools/build.py`: zostaví jeden `index.html` s vloženým kódom a `sw.js` s novou verziou cache.
 - `test/core.test.js` (`node test/core.test.js`): 22 testov jadra. Pakety DistoX, SAP6 a BRIC, ťahy a číslovanie staníc, rozvinutie, porovnanie s PocketTopo a Therionom.
-- `test/ui_test.py`: 34 testov rozhrania v Chrome s falošným DistoX2 a DistoX BLE (Playwright). Spúšťa sa `python3 test/ui_test.py <dist> <out>`. Cesta k vzorovému `Demo.txt` je v skripte.
+- `test/ui_test.py`: 47 testov rozhrania v Chrome s falošným DistoX2 a DistoX BLE (Playwright). Spúšťa sa `python3 test/ui_test.py <dist> <out>`. Cesta k vzorovému `Demo.txt` je v skripte.

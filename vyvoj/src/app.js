@@ -2,7 +2,7 @@
 (() => {
   'use strict';
   const WT = window.WT, U = WT.UUID;
-  const APP_VERSION = '1.2';
+  const APP_VERSION = '1.3';
   const $ = s => document.querySelector(s);
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const num = v => parseFloat(String(v).trim().replace(',', '.'));
@@ -14,7 +14,10 @@
     undo: '<svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg>',
     target: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>',
     fit: '<svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>',
-    menu: '<svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg>'
+    menu: '<svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg>',
+    zin: '<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>',
+    zout: '<svg viewBox="0 0 24 24"><path d="M5 12h14"/></svg>',
+    chev: '<svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg>'
   };
   const PEN = { black: '#141414', gray: '#8a8a8a', brown: '#8d5524', blue: '#1565c0', red: '#d32f2f', green: '#2e7d32', orange: '#f57c00' };
   const PEN_SK = { black: 'čierna', gray: 'sivá', brown: 'hnedá', blue: 'modrá', red: 'červená', green: 'zelená', orange: 'oranžová' };
@@ -49,7 +52,37 @@
   // ---------------- stav ----------------
   let sv = null, geo = null, flashId = null, curView = 'vData', dev = null, persistAsked = false;
   let sel = null;   // zvýraznený bod {t:'st', name} alebo riadok {t:'sh', id}
-  function select(x) { sel = x; renderTable(); planView.requestRender(); elevView.requestRender(); }
+  function select(x) { sel = x; applySel(); planView.requestRender(); elevView.requestRender(); }
+  function rowSel(sh) { return !!sel && (sel.t === 'sh' ? sel.id === sh.id : (!!sh.to && sh.to === sel.name)); }
+  function applySel() {
+    document.querySelectorAll('#tbody tr[data-id]').forEach(tr => {
+      const sh = sv.shots.find(x => x.id === tr.dataset.id);
+      tr.classList.toggle('sel', !!sh && rowSel(sh));
+    });
+  }
+
+  // ---------------- krok späť pre dáta (merania, úpravy, mazanie, stanice) ----------------
+  let undoData = [];
+  function snap() {
+    if (!sv) return;
+    const anc = [];
+    for (const p of ['plan', 'elev']) for (const st of sv.sketch[p]) anc.push([st.id, st.anc]);
+    undoData.push(JSON.stringify({ shots: sv.shots, cur: sv.cur, next: sv.next, ext: sv.ext, start: sv.start, fix: sv.fix, anc }));
+    if (undoData.length > 60) undoData.shift();
+    syncUndo();
+  }
+  function undoDataStep() {
+    if (editing) finishEdit(false);
+    const j = undoData.pop();
+    if (!j) { toast('Nie je čo vrátiť'); return; }
+    const o = JSON.parse(j);
+    Object.assign(sv, { shots: o.shots, cur: o.cur, next: o.next, ext: o.ext, start: o.start, fix: o.fix });
+    const m = new Map(o.anc);
+    for (const p of ['plan', 'elev']) for (const st of sv.sketch[p]) if (m.has(st.id)) st.anc = m.get(st.id);
+    if (sel && sel.t === 'sh' && !sv.shots.some(x => x.id === sel.id)) sel = null;
+    syncUndo(); changed(true); toast('Krok späť');
+  }
+  function syncUndo() { const b = document.getElementById('btnUndoData'); if (b) b.disabled = !undoData.length; }
   let saveT = 0, saving = Promise.resolve();
   const devLogLines = [];
 
@@ -418,6 +451,7 @@
   // ============================== merania ==============================
   function onMeasurement(m) {
     if (!sv) return;
+    snap();
     const r = WT.addMeasurement(sv, m, { tolD: S.tolD, tolA: S.tolA, legShots: S.legShots });
     flashId = r.shot.id;
     if (r.kind === 'leg') {
@@ -439,7 +473,7 @@
     if (dev && dev.state === 'on') {
       const ok = await dev.command('shot').catch(() => false);
       if (!ok) toast('Prístroj nepodporuje meranie na diaľku – stlač tlačidlo na prístroji');
-    } else manualDialog();
+    } else toast('Prístroj nie je pripojený');
   }
 
   // ============================== vykreslenie ==============================
@@ -460,31 +494,117 @@
     const st = dev ? dev.state : 'off';
     p.className = 'pill ' + st;
     $('#devName').textContent = !dev || st === 'off' ? 'Pripojiť' : (st === 'on' ? dev.name : dev.text);
-    $('#btnShot').textContent = st === 'on' ? 'Meraj' : '+ Ručne';
     const ds = document.getElementById('devState');
     if (ds) ds.textContent = !dev ? 'Nepripojené' : (dev.name + ' – ' + ({ on: 'pripojené', off: 'odpojené', wait: 'čakám na prístroj', connecting: 'pripájam' }[st] || st));
   }
   function rowHTML(sh) {
     const leg = !!sh.to;
-    const isSel = sel && (sel.t === 'sh' ? sel.id === sh.id : (leg && sh.to === sel.name));
-    const cls = (leg ? 'leg' : 'splay') + (sh.id === flashId ? ' new' : '') + ((sh.to || sh.from) === sv.cur && leg ? ' cur' : '') + (isSel ? ' sel' : '');
-    return '<tr class="' + cls + '" data-id="' + sh.id + '"><td class="st">' + esc(sh.from) + '</td><td class="st">' + (leg ? esc(sh.to) : '–') +
-      (sh.c ? '<span class="cm">✎</span>' : '') + '</td><td>' + WT.fmt(sh.d, 2) + '</td><td>' + WT.fmt(+WT.fmtAz(sh.a), 1) + '</td><td>' + WT.fmt(sh.i, 1) +
-      '</td><td class="ex">' + (leg ? (sh.ext >= 0 ? '›' : '‹') : '') + '</td></tr>';
+    const cls = (leg ? 'leg' : 'splay') + (sh.id === flashId ? ' new' : '') + ((sh.to || sh.from) === sv.cur && leg ? ' cur' : '') + (rowSel(sh) ? ' sel' : '');
+    return '<tr class="' + cls + '" data-id="' + sh.id + '"><td class="mn">' + ICON.chev + '</td><td class="st" data-f="from">' + esc(sh.from) +
+      '</td><td class="st" data-f="to">' + (leg ? esc(sh.to) : '–') + (sh.c ? '<span class="cm">✎</span>' : '') +
+      '</td><td data-f="d">' + WT.fmt(sh.d, 2) + '</td><td data-f="a">' + WT.fmt(+WT.fmtAz(sh.a), 1) + '</td><td data-f="i">' + WT.fmt(sh.i, 1) +
+      '</td><td class="ex" data-f="ext">' + (leg ? (sh.ext >= 0 ? '›' : '‹') : '') + '</td></tr>';
   }
   function renderTable() {
+    if (editing) { tablePending = true; return; }
+    tablePending = false;
     const shots = S.hideSplays ? sv.shots.filter(x => x.to) : sv.shots;
     $('#tbody').innerHTML = shots.map(rowHTML).join('');
     $('#empty').style.display = sv.shots.length ? 'none' : '';
     document.body.dataset.font = S.font;
+    renderEntry();
+    syncUndo();
+  }
+  function renderEntry() {
+    $('#enFrom').textContent = sv.cur;
+    $('#enExt').textContent = sv.ext >= 0 ? '›' : '‹';
   }
   function scrollTableEnd() { const w = $('#tblWrap'); requestAnimationFrame(() => { w.scrollTop = w.scrollHeight; }); }
+
+  // ---------------- priama úprava hodnoty v riadku (dvojklik / dlhé podržanie) ----------------
+  let editing = null, tablePending = false;
+  function applyShotEdit(sh, v) {
+    const wasLeg = !!sh.to, old = { from: sh.from, to: sh.to };
+    Object.assign(sh, v);
+    const used = n => sv.shots.some(x => x.from === n || x.to === n);
+    if (!wasLeg && sh.to && sh.from === sv.cur) WT.setCurrent(sv, sh.to);
+    else if (old.to && sv.cur === old.to && !used(old.to)) WT.setCurrent(sv, sh.to || sh.from);
+    else if (sv.cur === old.from && !used(old.from)) WT.setCurrent(sv, sh.from);
+    else if (sv.next === sv.cur || (used(sv.next) && sv.next === old.to)) sv.next = WT.suggestNext(sv, sv.cur);
+  }
+  function startEdit(td) {
+    if (editing) finishEdit(true);
+    const tr = td.closest('tr'), f = td.dataset.f;
+    const sh = tr && sv.shots.find(x => x.id === tr.dataset.id);
+    if (!sh || !f) return;
+    if (f === 'ext') { if (sh.to) { snap(); WT.setLegExt(sv, sh.id, sh.ext >= 0 ? -1 : 1); changed(); } return; }
+    const val = f === 'from' ? sh.from : f === 'to' ? sh.to : f === 'd' ? WT.fmt(sh.d, 3) : f === 'a' ? WT.fmtAz(sh.a) : WT.fmt(sh.i, 2);
+    const inp = document.createElement('input');
+    inp.className = 'cell'; inp.value = val; inp.autocomplete = 'off';
+    inp.setAttribute('autocapitalize', 'off'); inp.setAttribute('enterkeyhint', 'done');
+    if (f === 'd' || f === 'a' || f === 'i') inp.inputMode = 'decimal';
+    td.textContent = ''; td.append(inp); td.classList.add('editing');
+    editing = { sh, f, inp, orig: val };
+    inp.addEventListener('keydown', e => {
+      if (e.key === 'Enter') { e.preventDefault(); finishEdit(true); }
+      else if (e.key === 'Escape') { e.preventDefault(); finishEdit(false); }
+    });
+    inp.addEventListener('blur', () => finishEdit(true));
+    inp.focus(); inp.select();
+    setTimeout(() => { try { inp.scrollIntoView({ block: 'nearest' }); } catch (x) { /* */ } }, 300);
+  }
+  function finishEdit(commit) {
+    const e = editing; if (!e) return;
+    editing = null;
+    const raw = e.inp.value.trim();
+    if (commit && raw !== e.orig) {
+      try {
+        const v = {};
+        if (e.f === 'from' || e.f === 'to') {
+          if (e.f === 'from' && !raw) throw new Error('Od nesmie byť prázdne');
+          if (raw && !validName(raw)) throw new Error('Názov stanice: len písmená bez diakritiky, číslice, bodka, - a _');
+          if (raw && raw === (e.f === 'from' ? e.sh.to : e.sh.from)) throw new Error('Od a Do musia byť rôzne');
+          v[e.f] = raw;
+        } else {
+          const x = num(raw);
+          if (e.f === 'd' && !(x >= 0)) throw new Error('Dĺžka musí byť číslo ≥ 0');
+          if (e.f === 'a' && !(x >= 0 && x <= 360)) throw new Error('Azimut musí byť 0–360°');
+          if (e.f === 'i' && !(x >= -90 && x <= 90)) throw new Error('Sklon musí byť −90 až 90°');
+          v[e.f] = e.f === 'a' ? WT.norm360(x) : x;
+        }
+        snap(); applyShotEdit(e.sh, v); changed(true);
+        return;
+      } catch (err) { toast(err.message, 'bad'); }
+    }
+    renderTable();
+  }
+
+  // ---------------- posledný riadok = nové meranie ručne ----------------
+  function commitEntry(fromEnter) {
+    const g = id => $(id).value.trim();
+    if (!g('#enD') || !g('#enA') || !g('#enI')) { if (fromEnter) toast('Vyplň dĺžku, azimut a sklon'); return false; }
+    const to = g('#enTo'), d = num(g('#enD')), a = num(g('#enA')), i = num(g('#enI'));
+    try {
+      if (to && !validName(to)) throw new Error('Názov stanice: len písmená bez diakritiky, číslice, bodka, - a _');
+      if (to && to === sv.cur) throw new Error('Od a Do musia byť rôzne');
+      if (!(d >= 0) || !(a >= 0 && a <= 360) || !(i >= -90 && i <= 90)) throw new Error('Skontroluj hodnoty: dĺžka ≥ 0, azimut 0–360°, sklon −90 až 90°');
+    } catch (err) { toast(err.message, 'bad'); return false; }
+    snap();
+    const shot = { id: WT.uid(), from: sv.cur, to, d, a: WT.norm360(a), i, ext: sv.ext, t: Date.now(), c: '', manual: true };
+    sv.shots.push(shot);
+    if (to) WT.setCurrent(sv, to); else sv.next = WT.suggestNext(sv, sv.cur);
+    flashId = shot.id;
+    for (const id of ['#enTo', '#enD', '#enA', '#enI']) $(id).value = '';
+    changed(true); scrollTableEnd();
+    toast(to ? 'Ťah ' + shot.from + ' → ' + to : 'Zámer z ' + shot.from, 'ok');
+    return true;
+  }
 
   // ---------------- náčrt ----------------
   class SketchView {
     constructor(canvas, proj) {
       this.cv = canvas; this.ctx = canvas.getContext('2d'); this.proj = proj;
-      this.v = null; this.ptrs = new Map(); this.tool = 'pen'; this.col = 'black';
+      this.v = null; this.ptrs = new Map(); this.tool = 'pan'; this.col = 'black';
       this.stroke = null; this.undo = []; this.raf = 0; this.W = 1; this.H = 1;
       canvas.addEventListener('pointerdown', e => this.down(e));
       canvas.addEventListener('pointermove', e => this.move(e));
@@ -588,6 +708,11 @@
       c.strokeStyle = '#b3261e'; c.lineWidth = 2.2; c.beginPath();
       for (const sg of geo.segs) if (sg.kind === 'leg') { const q = sg[key]; c.moveTo(this.sx(q[0]), this.sy(q[1])); c.lineTo(this.sx(q[2]), this.sy(q[3])); }
       c.stroke();
+      // vybraný riadok tabuľky farebne nad ťahmi
+      if (sel && sel.t === 'sh') {
+        const sg = geo.segs.find(x => x.id === sel.id);
+        if (sg) { const q = sg[key]; c.strokeStyle = '#0288d1'; c.lineWidth = sg.kind === 'leg' ? 3.4 : 2.2; c.beginPath(); c.moveTo(this.sx(q[0]), this.sy(q[1])); c.lineTo(this.sx(q[2]), this.sy(q[3])); c.stroke(); }
+      }
       // stanice
       const showLabels = S.labels && s >= 6;
       c.font = '600 12px system-ui, sans-serif'; c.textBaseline = 'middle';
@@ -736,38 +861,75 @@
   }
 
   // ============================== dialógy ==============================
-  function stationMenu(name) {
+  const mbtn = (id, main, sub, o) => '<button class="mbtn' + (o && o.on ? ' on' : '') + (o && o.bad ? ' bad' : '') + '" data-a="' + id + '"' + (o && o.dis ? ' disabled' : '') +
+    '><b>' + esc(main) + '</b><small>' + esc(sub) + '</small></button>';
+  const extToast = (dir, all, n, leg) => {
+    const w = dir > 0 ? 'vpravo ›' : '‹ vľavo';
+    if (!all) toast('Ťah ' + leg.from + ' – ' + leg.to + ' rozvinutý ' + w);
+    else toast('Odtiaľ ' + n + (n === 1 ? ' ťah rozvinutý ' : n < 5 ? ' ťahy rozvinuté ' : ' ťahov rozvinutých ') + w);
+  };
+  // Menu bodu: ťuknutie na bod v náčrte alebo šípka pri riadku ťahu (rowLeg = ťah z riadku).
+  function stationMenu(name, rowLeg) {
     const inc = WT.incoming(sv, name, geo);
-    const leg = inc && inc.leg;
+    const leg = rowLeg || (inc && inc.leg);
+    const from = rowLeg ? rowLeg.from : inc && inc.from;
     const ext = leg ? (leg.ext >= 0 ? 1 : -1) : 0;
-    const btn = (id, main, sub, opt) => '<button class="mbtn' + (opt && opt.on ? ' on' : '') + '" data-a="' + id + '"' + (opt && opt.dis ? ' disabled' : '') +
-      '><b>' + esc(main) + '</b><small>' + esc(sub) + '</small></button>';
-    const body = '<div class="mgrid r3">' +
-      btn('rev', 'Otočiť ťah', leg ? leg.from + ' – ' + leg.to : 'bez ťahu', { dis: !leg }) +
-      btn('cont', 'Pokračovať', 'z ' + name, { on: sv.cur === name }) +
-      btn('ren', 'Premenovať', name) + '</div>' +
+    let body = '<div class="mgrid r3">' +
+      mbtn('rev', 'Otočiť ťah', leg ? leg.from + ' – ' + leg.to : 'bez ťahu', { dis: !leg }) +
+      mbtn('cont', 'Pokračovať', 'z ' + name, { on: sv.cur === name }) +
+      mbtn('ren', 'Premenovať', name) + '</div>' +
       '<div class="mgrid r4">' +
-      btn('l1', '‹ Rozvinúť', 'vľavo', { dis: !leg, on: ext < 0 }) +
-      btn('r1', 'Rozvinúť ›', 'vpravo', { dis: !leg, on: ext > 0 }) +
-      btn('la', '‹ Všetko', 'odtiaľ vľavo') +
-      btn('ra', 'Všetko ›', 'odtiaľ vpravo') + '</div>';
-    const m = modal('Bod ' + name, body, [], { sub: inc ? 'z bodu ' + inc.from : (name === sv.start ? 'počiatočný bod' : '') });
+      mbtn('l1', '‹ Rozvinúť', 'vľavo', { dis: !leg, on: ext < 0 }) +
+      mbtn('r1', 'Rozvinúť ›', 'vpravo', { dis: !leg, on: ext > 0 }) +
+      mbtn('la', '‹ Všetko', 'odtiaľ vľavo') +
+      mbtn('ra', 'Všetko ›', 'odtiaľ vpravo') + '</div>';
+    if (rowLeg) {
+      const nr = rowLeg.raw ? rowLeg.raw.length : 0;
+      body += '<div class="mgrid r3">' +
+        mbtn('edit', 'Upraviť', rowLeg.c ? '✎ poznámka' : 'aj poznámku') +
+        mbtn('split', 'Rozdeliť', nr > 1 ? 'na ' + nr + ' zámery' : 'jedno meranie', { dis: nr < 2 }) +
+        mbtn('del', 'Vymazať', 'riadok', { bad: true }) + '</div>';
+    }
+    const m = modal('Bod ' + name, body, [], { sub: from ? 'z bodu ' + from : (name === sv.start ? 'počiatočný bod' : '') });
     m.el.classList.add('compact');
-    m.el.querySelector('.sh-b').addEventListener('click', e => {
+    m.el.querySelector('.sh-b').addEventListener('click', async e => {
       const b = e.target.closest('button[data-a]'); if (!b || b.disabled) return;
       const a = b.dataset.a;
       close(m);
-      if (a === 'rev') { WT.reverseShot(sv, leg.id); changed(); toast('Ťah teraz ' + leg.from + ' → ' + leg.to); }
-      else if (a === 'cont') { WT.setCurrent(sv, name); changed(); toast('Pokračuješ z ' + name); }
+      if (a === 'rev') { snap(); WT.reverseShot(sv, leg.id); changed(); toast('Ťah teraz ' + leg.from + ' → ' + leg.to); }
+      else if (a === 'cont') { snap(); WT.setCurrent(sv, name); changed(); toast('Pokračuješ z ' + name); }
       else if (a === 'ren') renameDialog(name);
+      else if (a === 'edit') editDialog(rowLeg);
+      else if (a === 'split') { snap(); WT.splitLeg(sv, rowLeg.id); changed(); }
+      else if (a === 'del') { if (await confirmBox('Vymazať riadok ' + rowLeg.from + ' → ' + rowLeg.to + '?', 'Vymazať')) { snap(); WT.deleteShot(sv, rowLeg.id); changed(); } }
       else {
         const dir = a[0] === 'r' ? 1 : -1, all = a[1] === 'a';
-        const n = WT.setExtend(sv, name, dir, all);
+        snap();
+        let n = 1;
+        if (all) n = WT.setExtend(sv, name, dir, true);
+        if (leg && (!all || rowLeg)) WT.setLegExt(sv, leg.id, dir);
         changed();
-        const w = dir > 0 ? 'vpravo ›' : '‹ vľavo';
-        if (!all) toast('Ťah ' + leg.from + ' – ' + leg.to + ' rozvinutý ' + w);
-        else toast('Odtiaľ ' + n + (n === 1 ? ' ťah rozvinutý ' : n < 5 ? ' ťahy rozvinuté ' : ' ťahov rozvinutých ') + w);
+        extToast(dir, all, n, leg);
       }
+    });
+  }
+  function splayMenu(sh) {
+    const to = sh.from === sv.cur ? sv.next : WT.suggestNext(sv, sh.from);
+    const body = '<div class="mgrid r4">' +
+      mbtn('leg', 'Na ťah', sh.from + ' → ' + to) +
+      mbtn('cont', 'Pokračovať', 'z ' + sh.from, { on: sv.cur === sh.from }) +
+      mbtn('edit', 'Upraviť', sh.c ? '✎ poznámka' : 'aj poznámku') +
+      mbtn('del', 'Vymazať', 'riadok', { bad: true }) + '</div>';
+    const m = modal('Zámer z ' + sh.from, body, [], { sub: WT.fmt(sh.d, 2) + ' m · ' + WT.fmt(+WT.fmtAz(sh.a), 1) + '° · ' + WT.fmt(sh.i, 1) + '°' });
+    m.el.classList.add('compact');
+    m.el.querySelector('.sh-b').addEventListener('click', async e => {
+      const b = e.target.closest('button[data-a]'); if (!b || b.disabled) return;
+      const a = b.dataset.a;
+      close(m);
+      if (a === 'leg') { snap(); WT.makeLeg(sv, sh.id, to); changed(); toast('Ťah ' + sh.from + ' → ' + to); }
+      else if (a === 'cont') { snap(); WT.setCurrent(sv, sh.from); changed(); toast('Pokračuješ z ' + sh.from); }
+      else if (a === 'edit') editDialog(sh);
+      else if (a === 'del') { if (await confirmBox('Vymazať zámer z ' + sh.from + '?', 'Vymazať')) { snap(); WT.deleteShot(sv, sh.id); changed(); } }
     });
   }
   function renameDialog(name) {
@@ -777,7 +939,7 @@
         const to = el.querySelector('#rnTo').value.trim();
         if (!validName(to)) throw new Error('Názov môže mať len písmená bez diakritiky, číslice, bodku, - a _');
         if (WT.stationNames(sv).has(to) && to !== name) throw new Error('Stanica ' + to + ' už existuje');
-        const n = WT.renameStation(sv, name, to); changed(); toast('Premenované (' + n + '×)');
+        snap(); const n = WT.renameStation(sv, name, to); changed(); toast('Premenované (' + n + '×)');
       } }
     ]);
   }
@@ -797,6 +959,7 @@
         const cur = el.querySelector('#sdCur').value.trim(), nx = el.querySelector('#sdNext').value.trim();
         if (!validName(cur) || !validName(nx)) throw new Error('Názov môže mať len písmená bez diakritiky, číslice, bodku, - a _');
         if (cur === nx) throw new Error('Od a Do musia byť rôzne');
+        snap();
         if (cur !== sv.cur) WT.setCurrent(sv, cur);
         sv.next = nx; sv.ext = +el.querySelector('#sdExt').value;
         changed();
@@ -809,28 +972,6 @@
       el.querySelector('#sdNext').value = WT.suggestNext(sv, b.dataset.n);
     });
     el.querySelector('#sdCur').addEventListener('change', e => { const v = e.target.value.trim(); if (v) el.querySelector('#sdNext').value = WT.suggestNext(sv, v); });
-  }
-
-  function shotMenu(sh) {
-    const leg = !!sh.to;
-    const title = (leg ? sh.from + ' → ' + sh.to : 'Zámer z ' + sh.from) + '   ' + WT.fmt(sh.d, 2) + ' m · ' + WT.fmt(+WT.fmtAz(sh.a), 1) + '° · ' + WT.fmt(sh.i, 1) + '°';
-    const b = [];
-    b.push({ label: 'Upraviť…', cls: 'pri', onClick: () => { editDialog(sh); } });
-    if (leg) {
-      b.push({ label: 'Rez: ' + (sh.ext >= 0 ? '› doprava → zmeniť na ‹ doľava' : '‹ doľava → zmeniť na › doprava'), onClick: () => { WT.toggleExt(sv, sh.id); changed(); } });
-      b.push({ label: 'Otočiť smer (spätný zámer)', onClick: () => { WT.reverseShot(sv, sh.id); changed(); toast('Teraz ' + sh.from + ' → ' + sh.to); } });
-      if (sh.raw && sh.raw.length > 1) b.push({ label: 'Rozdeliť na ' + sh.raw.length + ' zámery', onClick: () => { WT.splitLeg(sv, sh.id); changed(); } });
-      b.push({ label: 'Pokračovať z ' + sh.to, onClick: () => { WT.setCurrent(sv, sh.to); changed(); } });
-      b.push({ label: 'Pokračovať z ' + sh.from, onClick: () => { WT.setCurrent(sv, sh.from); changed(); } });
-    } else {
-      const to = sh.from === sv.cur ? sv.next : WT.suggestNext(sv, sh.from);
-      b.push({ label: 'Spraviť z neho ťah ' + sh.from + ' → ' + to, onClick: () => { WT.makeLeg(sv, sh.id, to); changed(); } });
-      b.push({ label: 'Pokračovať z ' + sh.from, onClick: () => { WT.setCurrent(sv, sh.from); changed(); } });
-    }
-    b.push({ label: 'Vymazať', cls: 'bad', onClick: async () => { if (await confirmBox('Vymazať toto meranie?', 'Vymazať')) { WT.deleteShot(sv, sh.id); changed(); } } });
-    const m = modal(title, '', b);
-    m.el.querySelector('.sh-f').classList.add('vert');
-    if (sh.c) m.el.querySelector('.sh-b').innerHTML = '<p>✎ ' + esc(sh.c) + '</p>';
   }
 
   function shotForm(sh, isNew) {
@@ -861,34 +1002,12 @@
       { label: 'Zrušiť' },
       { label: 'Uložiť', cls: 'pri', onClick: el => {
         const v = readForm(el);
-        const wasLeg = !!sh.to, old = { from: sh.from, to: sh.to };
-        Object.assign(sh, v);
-        const used = n => sv.shots.some(x => x.from === n || x.to === n);
-        if (!wasLeg && sh.to && sh.from === sv.cur) WT.setCurrent(sv, sh.to);
-        else if (old.to && sv.cur === old.to && !used(old.to)) WT.setCurrent(sv, sh.to || sh.from);
-        else if (sv.cur === old.from && !used(old.from)) WT.setCurrent(sv, sh.from);
-        else if (sv.next === sv.cur || used(sv.next) && sv.next === old.to) sv.next = WT.suggestNext(sv, sv.cur);
+        snap(); applyShotEdit(sh, v);
         changed();
       } }
     ]);
     m.el.querySelector('#fE').value = String(sh.ext >= 0 ? 1 : -1);
   }
-  function manualDialog() {
-    const sh = { from: sv.cur, to: sv.next, d: 0, a: 0, i: 0, ext: sv.ext, c: '' };
-    const m = modal('Ručné meranie', shotForm(sh, true), [
-      { label: 'Zrušiť' },
-      { label: 'Pridať', cls: 'pri', onClick: el => {
-        const v = readForm(el);
-        const shot = Object.assign({ id: WT.uid(), t: Date.now(), manual: true }, v);
-        sv.shots.push(shot);
-        if (v.to && v.from === sv.cur) WT.setCurrent(sv, v.to);
-        else sv.next = WT.suggestNext(sv, sv.cur);
-        flashId = shot.id; changed(true); scrollTableEnd();
-      } }
-    ]);
-    m.el.querySelector('#fE').value = String(sv.ext >= 0 ? 1 : -1);
-  }
-
   function deviceDialog() {
     const caps = '<div class="caps"><span class="' + (hasSerial() ? 'y' : 'n') + '">Web Serial ' + (hasSerial() ? '✓' : '✗') + '</span>' +
       '<span class="' + (hasBle() ? 'y' : 'n') + '">Web Bluetooth ' + (hasBle() ? '✓' : '✗') + '</span></div>';
@@ -1018,7 +1137,7 @@
     geo = WT.compute(sv);
     try { localStorage.setItem('wt.last', sv.id); } catch (e) { /* */ }
     if (isNew) await save(true);
-    planView.undo = []; elevView.undo = []; sel = null;
+    planView.undo = []; elevView.undo = []; sel = null; undoData = []; editing = null;
     planView.v = null; elevView.v = null;
     planView.resize(); elevView.resize();
     renderAll(); scrollTableEnd();
@@ -1113,8 +1232,8 @@
       '<p><b>Pripojenie.</b> Ťukni na <i>Pripojiť</i> vpravo hore. DistoX2 najprv spáruj v systéme (PIN 0000), BLE prístroje nie. Funguje v Chrome na Androide; iPhone nemá Web Serial ani Web Bluetooth.</p>' +
       '<p><b>Meranie.</b> Každé meranie je zámer z aktuálnej stanice (Od). Tri zhodné merania za sebou (±5 cm, ±1,7°) sa spoja do ťahu Od → Do a aktuálnou stanicou sa stane Do. Štvrté zhodné meranie ťah len spresní.</p>' +
       '<p><b>Stanice.</b> Ťukni na pásik „Od → Do“: nastavíš, odkiaľ pokračuješ, a názov ďalšej stanice. Z inej ako poslednej stanice začne nová séria (1.3 → 2.1).</p>' +
-      '<p><b>Tabuľka.</b> Ťuknutím na riadok: úprava, zmena smeru v reze (‹ ›), otočenie ťahu, rozdelenie ťahu späť na zámery, vymazanie.</p>' +
-      '<p><b>Náčrt.</b> Pôdorys a rozvinutý rez. Farbou kreslíš jedným prstom, dvoma prstami posúvaš a zväčšuješ. ✋ = posun, guma maže celé čiary, ↶ vráti krok. Ťuknutím na bod otvoríš jeho menu: otočiť ťah, rozvinúť vľavo/vpravo (len ťah do bodu alebo všetko odtiaľ ďalej), pokračovať z bodu, premenovať. Čiary sú ukotvené k najbližšej stanici, takže pri oprave dát sa posunú s ňou.</p>' +
+      '<p><b>Tabuľka.</b> Ťuknutie na riadok ho označí (aj v náčrte). Šípka ▸ pred riadkom otvorí menu bodu: otočiť ťah, rozvinúť, pokračovať, premenovať, upraviť, rozdeliť, vymazať. Dvojklik alebo dlhé podržanie na hodnote ju priamo upraví (na ‹ › prepne smer v reze). Posledný riadok je nové meranie ručne z aktuálnej stanice: Do (prázdne = zámer), dĺžka, azimut, sklon, Enter alebo +. Ikona ↶ vráti posledný krok v dátach.</p>' +
+      '<p><b>Náčrt.</b> Pôdorys a rozvinutý rez. Predvolene posun: jedným prstom posúvaš, dvoma zväčšuješ, + a − priblížia a oddialia. Pero s farbami kreslí, guma maže celé čiary, ↶ vráti krok. Ťuknutím na bod otvoríš jeho menu. ⌖ dá aktívny bod do stredu a ukáže celý jeho polygón. Čiary sú ukotvené k najbližšej stanici, takže pri oprave dát sa posunú s ňou.</p>' +
       '<p><b>Therion.</b> Export → Balík pre Therion: .th, .th2 s vloženým .xvi podkladom pre xtherion a PocketTopo .txt (xtherion ho importuje ako doteraz). Import vie načítať PocketTopo .txt aj zálohu .json.</p>' +
       '<p><b>Offline.</b> Po prvom otvorení funguje bez signálu. Dáta sa ukladajú v telefóne po každom meraní; pravidelne si rob export.</p>' +
       '</div>', [{ label: 'Rozumiem', cls: 'pri' }]);
@@ -1171,6 +1290,8 @@
       '<button class="tb" data-tool="pan" title="Posun">' + ICON.hand + '</button>' +
       '<button class="tb" data-tool="erase" title="Guma">' + ICON.erase + '</button>' +
       '<button class="tb" id="tUndo" title="Späť">' + ICON.undo + '</button>' +
+      '<button class="tb" id="tZout" title="Oddialiť">' + ICON.zout + '</button>' +
+      '<button class="tb" id="tZin" title="Priblížiť">' + ICON.zin + '</button>' +
       '<button class="tb" id="tCenter" title="Na aktuálnu stanicu">' + ICON.target + '</button>' +
       '<button class="tb" id="tFit" title="Celý náčrt">' + ICON.fit + '</button>';
     planView = new SketchView($('#cvPlan'), 'plan');
@@ -1185,19 +1306,54 @@
       else if (b.id === 'tUndo') v.doUndo();
       else if (b.id === 'tCenter') v.center();
       else if (b.id === 'tFit') v.fit();
+      else if (b.id === 'tZin') v.zoomAt(v.W / 2, v.H / 2, 1.5);
+      else if (b.id === 'tZout') v.zoomAt(v.W / 2, v.H / 2, 1 / 1.5);
       syncTools();
     });
     document.querySelectorAll('#tabs [data-v]').forEach(b => b.onclick = () => showView(b.dataset.v));
-    $('#btnShot').onclick = doShot;
     $('#btnMenu').onclick = menuDialog;
     $('#devPill').onclick = deviceDialog;
     $('#stChip').onclick = stationDialog;
-    $('#tbody').addEventListener('click', e => {
-      const tr = e.target.closest('tr'); if (!tr) return;
-      const sh = sv.shots.find(x => x.id === tr.dataset.id); if (sh) { select({ t: 'sh', id: sh.id }); shotMenu(sh); }
+    // tabuľka: klik = označiť, šípka = menu, dvojklik / dlhé podržanie na hodnote = priama úprava
+    const tb = $('#tbody');
+    let lp = null, lastTap = null;
+    tb.addEventListener('pointerdown', e => {
+      const td = e.target.closest('td[data-f]');
+      if (!td || td.classList.contains('editing')) { lp = null; return; }
+      const me = { td, x: e.clientX, y: e.clientY, fired: false };
+      me.timer = setTimeout(() => { if (lp === me && td.isConnected) { me.fired = true; vib(25); startEdit(td); } }, 550);
+      lp = me;
     });
+    tb.addEventListener('pointermove', e => { if (lp && !lp.fired && Math.hypot(e.clientX - lp.x, e.clientY - lp.y) > 10) { clearTimeout(lp.timer); lp = null; } });
+    tb.addEventListener('pointerup', () => { if (lp && !lp.fired) clearTimeout(lp.timer); });
+    tb.addEventListener('pointercancel', () => { if (lp) clearTimeout(lp.timer); lp = null; });
+    tb.addEventListener('contextmenu', e => e.preventDefault());
+    tb.addEventListener('click', e => {
+      if (e.target.closest('td.editing')) return;
+      if (lp && lp.fired) { lp = null; return; }
+      lp = null;
+      const tr = e.target.closest('tr'); if (!tr || !tr.dataset.id) return;
+      const sh = sv.shots.find(x => x.id === tr.dataset.id); if (!sh) return;
+      if (e.target.closest('td.mn')) { lastTap = null; select({ t: 'sh', id: sh.id }); if (sh.to) stationMenu(sh.to, sh); else splayMenu(sh); return; }
+      const td = e.target.closest('td[data-f]'), now = performance.now();
+      if (td && lastTap && lastTap.id === sh.id && lastTap.f === td.dataset.f && now - lastTap.t < 400) { lastTap = null; startEdit(td); return; }
+      lastTap = { id: sh.id, f: td && td.dataset.f, t: now };
+      select({ t: 'sh', id: sh.id });
+    });
+    // nový riadok
+    const order = ['#enTo', '#enD', '#enA', '#enI'];
+    order.forEach((id, k) => $(id).addEventListener('keydown', e => {
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      if (k < order.length - 1) $(order[k + 1]).focus();
+      else if (commitEntry(true)) $('#enD').focus();
+    }));
+    $('#enAdd').onclick = () => commitEntry(true);
+    $('#enFrom').onclick = stationDialog;
+    $('#enExt').onclick = () => { sv.ext = sv.ext >= 0 ? -1 : 1; save(); renderHeader(); renderEntry(); };
+    $('#btnUndoData').innerHTML = ICON.undo;
+    $('#btnUndoData').onclick = undoDataStep;
     $('#emptyDev').onclick = deviceDialog;
-    $('#emptyMan').onclick = manualDialog;
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') { if (sv) save(true); } else applyWake(); });
     window.addEventListener('pagehide', () => { if (sv) save(true); });
     document.addEventListener('pointerdown', () => { if (S.sound && !actx) { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { /* */ } } }, { once: true });

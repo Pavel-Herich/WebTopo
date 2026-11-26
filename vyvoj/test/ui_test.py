@@ -128,8 +128,15 @@ with sync_playwright() as p:
     check('merania po znovupripojení dorazia', page.evaluate("WTapp.survey.shots.filter(x => x.to).length") == 4)
 
     # --- riadok tabuľky: zmena smeru v reze ---
-    page.click('#tbody tr.leg >> nth=1')
-    page.click('.sheet .btn:has-text("Rez:")')
+    # klik na riadok len označí (bez menu)
+    page.click('#tbody tr.leg >> nth=1 >> td[data-f=d]')
+    check('klik na riadok označí bez menu', page.locator('.modal').count() == 0 and page.locator('#tbody tr.sel').count() == 1)
+    page.click('#tbody tr.leg >> nth=1 >> td.mn')
+    page.wait_for_selector('.modal.compact')
+    hdr = page.inner_text('.modal.compact .sh-h .ttl')
+    check('šípka otvorí menu bodu riadku', 'Bod 1.2' in hdr and 'z bodu 1.1' in hdr and page.locator('.modal.compact .mgrid').count() == 3, hdr.replace('\n', ' | '))
+    page.screenshot(path=f'{OUT}/03b_menu_riadku.png')
+    page.click('.modal.compact button[data-a=l1]')
     ext = page.evaluate("WTapp.survey.shots.filter(x => x.to)[1].ext")
     check('zmena extend cez menu riadku', ext == -1, ext)
     check('kliknutý riadok ostane zvýraznený', page.locator('#tbody tr.sel').count() == 1 and page.locator('#tbody tr.leg >> nth=1').get_attribute('class').find('sel') >= 0)
@@ -139,7 +146,12 @@ with sync_playwright() as p:
     page.wait_for_timeout(300)
     box = page.locator('#cvPlan').bounding_box()
     cx, cy = box['x'] + box['width'] / 2, box['y'] + box['height'] / 2
-    page.click('#tPen'); page.screenshot(path=f'{OUT}/04a_paleta.png'); page.click('#palette [data-col=black]')
+    check('náčrt: predvolene posun', page.locator('#tools [data-tool=pan].on').count() == 1)
+    s0 = page.evaluate('WTapp.planView().v.s')
+    page.click('#tZin'); s1 = page.evaluate('WTapp.planView().v.s')
+    page.click('#tZout'); page.click('#tZout'); s2 = page.evaluate('WTapp.planView().v.s')
+    check('ikony + a − menia priblíženie', abs(s1 / s0 - 1.5) < 1e-6 and abs(s2 / s0 - 1 / 1.5) < 1e-6, (s0, s1, s2))
+    page.click('#tPen'); page.click('#tPen'); page.screenshot(path=f'{OUT}/04a_paleta.png'); page.click('#palette [data-col=black]')
     page.mouse.move(cx - 80, cy - 60); page.mouse.down()
     for k in range(20): page.mouse.move(cx - 80 + k * 8, cy - 60 + (k % 5) * 4)
     page.mouse.up()
@@ -208,6 +220,38 @@ with sync_playwright() as p:
     page.wait_for_timeout(300)
     page.screenshot(path=f'{OUT}/05_rez.png')
 
+    # --- priama úprava hodnoty dvojklikom ---
+    page.click('#tabs [data-v=vData]')
+    cell = '#tbody tr.leg >> nth=0 >> td[data-f=d]'
+    page.dblclick(cell)
+    page.wait_for_selector('#tbody input.cell')
+    page.fill('#tbody input.cell', '5,555'); page.keyboard.press('Enter')
+    d0 = page.evaluate("WTapp.survey.shots.filter(x => x.to)[0].d")
+    check('dvojklik: priama úprava dĺžky', abs(d0 - 5.555) < 1e-9, d0)
+    # dlhé podržanie na azimute
+    box = page.locator('#tbody tr.leg >> nth=0 >> td[data-f=a]').bounding_box()
+    page.mouse.move(box['x'] + box['width'] / 2, box['y'] + box['height'] / 2); page.mouse.down(); page.wait_for_timeout(750); page.mouse.up()
+    check('dlhé podržanie otvorí úpravu', page.locator('#tbody input.cell').count() == 1)
+    page.fill('#tbody input.cell', '999'); page.keyboard.press('Enter')
+    check('neplatná hodnota sa nezapíše', abs(page.evaluate("WTapp.survey.shots.filter(x => x.to)[0].a") - 263.2) < 0.5)
+    page.screenshot(path=f'{OUT}/05b_uprava.png')
+    # krok späť vráti úpravu dĺžky
+    page.click('#btnUndoData')
+    d1 = page.evaluate("WTapp.survey.shots.filter(x => x.to)[0].d")
+    check('krok späť v dátach', abs(d1 - 5.38) < 0.01, d1)
+    # posledný riadok: nové meranie
+    cur0 = page.evaluate('WTapp.survey.cur')
+    check('posledný riadok ukazuje aktuálny bod', page.inner_text('#enFrom') == cur0, (page.inner_text('#enFrom'), cur0))
+    n0 = page.evaluate('WTapp.survey.shots.length')
+    page.fill('#enD', '1,5'); page.fill('#enA', '90'); page.fill('#enI', '-3'); page.press('#enI', 'Enter')
+    last = page.evaluate('(() => { const s = WTapp.survey.shots; return s[s.length - 1]; })()')
+    check('nový riadok: zámer z aktuálneho bodu', page.evaluate('WTapp.survey.shots.length') == n0 + 1 and last['from'] == cur0 and last['to'] == '' and abs(last['d'] - 1.5) < 1e-9, last)
+    page.fill('#enTo', 'X1'); page.fill('#enD', '3'); page.fill('#enA', '10'); page.fill('#enI', '0'); page.click('#enAdd')
+    check('nový riadok s Do = ťah, bod sa posunie', page.evaluate('WTapp.survey.cur') == 'X1' and page.inner_text('#enFrom') == 'X1')
+    page.screenshot(path=f'{OUT}/05c_novy_riadok.png')
+    page.click('#btnUndoData'); page.click('#btnUndoData')
+    check('krok späť odstráni ručné riadky', page.evaluate('WTapp.survey.shots.length') == n0 and page.evaluate('WTapp.survey.cur') == cur0)
+    check('tlačidlo Ručne zmizlo', page.locator('#btnShot').count() == 0)
     # --- export balíka ---
     page.click('#tabs [data-v=vData]')
     page.click('#btnMenu')
@@ -278,7 +322,7 @@ with sync_playwright() as p:
 
     # --- dialógy na snímky ---
     page.click('#stChip'); page.wait_for_timeout(200); page.screenshot(path=f'{OUT}/10_stanice.png'); page.click('.sheet .x')
-    page.click('#tbody tr.leg >> nth=2'); page.wait_for_timeout(200); page.screenshot(path=f'{OUT}/11_menu_riadku.png'); page.click('.sheet .x')
+    page.click('#tbody tr.leg >> nth=2 >> td.mn'); page.wait_for_timeout(300); page.screenshot(path=f'{OUT}/11_menu_riadku.png'); page.click('.sheet .x')
     page.click('#devPill'); page.wait_for_timeout(200); page.screenshot(path=f'{OUT}/12_pristroj_dialog.png'); page.click('.sheet .x')
 
     errs = page.evaluate('window.__errors')

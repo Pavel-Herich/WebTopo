@@ -243,6 +243,13 @@
     if (legs.length && legs[legs.length - 1] === sh) s.ext = sh.ext;
     s.modified = Date.now();
   }
+  function setLegExt(s, id, dir) {
+    const sh = s.shots[findShot(s, id)]; if (!sh || !sh.to) return;
+    sh.ext = dir >= 0 ? 1 : -1;
+    const legs = s.shots.filter(x => x.to);
+    if (legs.length && legs[legs.length - 1] === sh) s.ext = sh.ext;
+    s.modified = Date.now();
+  }
   function splitLeg(s, id) { // ťah späť na pôvodné zámery
     const k = findShot(s, id); const sh = s.shots[k];
     if (!sh || !sh.to || !sh.raw) return;
@@ -615,7 +622,7 @@
     norm360, uid, isoDate, fmt, fmtAz, hex,
     distoxAck, decodeDistoX, DistoXStream, distoxBleFrame, decodeDistoXBle, decodeSap6, decodeBricPrimary, decodeBricMeta, decodeBricErr,
     newSurvey, normalizeSurvey, stationNames, suggestNext, setCurrent, angleBetween, shotsClose, averageShots,
-    addMeasurement, detectLeg, deleteShot, reverseShot, toggleExt, splitLeg, makeLeg, renameStation, stats, incoming, setExtend,
+    addMeasurement, detectLeg, deleteShot, reverseShot, toggleExt, setLegExt, splitLeg, makeLeg, renameStation, stats, incoming, setExtend,
     compute, projXY, makeStroke, strokeAbs,
     toTherion, toPocketTopo, toXVI, toTh2, therionBundle, safeName, fromPocketTopo, fromJSON, crc32, zip, Simulator
   };
