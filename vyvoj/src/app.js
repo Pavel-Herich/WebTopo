@@ -2,7 +2,7 @@
 (() => {
   'use strict';
   const WT = window.WT, U = WT.UUID;
-  const APP_VERSION = '1.3';
+  const APP_VERSION = '1.4';
   const $ = s => document.querySelector(s);
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const num = v => parseFloat(String(v).trim().replace(',', '.'));
@@ -17,7 +17,10 @@
     menu: '<svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg>',
     zin: '<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>',
     zout: '<svg viewBox="0 0 24 24"><path d="M5 12h14"/></svg>',
-    chev: '<svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg>'
+    chev: '<svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg>',
+    vData: '<svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M3 14.5h18M9 9v11"/></svg>',
+    vPlan: '<svg viewBox="0 0 24 24"><path d="M9 4L3 6.5v13.5l6-2.5 6 2.5 6-2.5V4l-6 2.5z"/><path d="M9 4v13.5M15 6.5V20"/></svg>',
+    vElev: '<svg viewBox="0 0 24 24"><path d="M2 6h20" stroke-dasharray="2 2.5"/><path d="M4 10l5 4 4-2 7 6"/><circle cx="4" cy="10" r="1.3"/><circle cx="9" cy="14" r="1.3"/><circle cx="13" cy="12" r="1.3"/><circle cx="20" cy="18" r="1.3"/></svg>'
   };
   const PEN = { black: '#141414', gray: '#8a8a8a', brown: '#8d5524', blue: '#1565c0', red: '#d32f2f', green: '#2e7d32', orange: '#f57c00' };
   const PEN_SK = { black: 'čierna', gray: 'sivá', brown: 'hnedá', blue: 'modrá', red: 'červená', green: 'zelená', orange: 'oranžová' };
@@ -90,7 +93,7 @@
     clearTimeout(saveT);
     const doSave = () => { const copy = JSON.parse(JSON.stringify(sv)); saving = saving.then(() => DB.put(copy)).catch(e => toast('Chyba ukladania: ' + e.message, 'bad')); return saving; };
     if (now) return doSave();
-    saveT = setTimeout(doSave, 400);
+    saveT = setTimeout(doSave, 0);   // každá zmena hneď (viac zmien v jednom kroku = jeden zápis)
   }
   function changed(saveNow) {
     sv.modified = Date.now();
@@ -1310,7 +1313,17 @@
       else if (b.id === 'tZout') v.zoomAt(v.W / 2, v.H / 2, 1 / 1.5);
       syncTools();
     });
-    document.querySelectorAll('#tabs [data-v]').forEach(b => b.onclick = () => showView(b.dataset.v));
+    document.querySelectorAll('#tabs [data-v]').forEach(b => { b.innerHTML = ICON[b.dataset.v]; b.onclick = () => showView(b.dataset.v); });
+    // na šírku: horné lišty ostávajú, spodné panely idú na fyzický spodok telefónu (bok obrazovky)
+    const orient = () => {
+      const land = window.innerWidth > window.innerHeight && window.innerHeight < 600;
+      const o = screen.orientation, ang = o && typeof o.angle === 'number' ? o.angle : (typeof window.orientation === 'number' ? window.orientation : 90);
+      document.body.classList.toggle('land', land);
+      document.body.classList.toggle('land-l', land && (ang === 270 || ang === -90));
+    };
+    window.addEventListener('resize', orient);
+    if (screen.orientation && screen.orientation.addEventListener) screen.orientation.addEventListener('change', orient);
+    orient();
     $('#btnMenu').onclick = menuDialog;
     $('#devPill').onclick = deviceDialog;
     $('#stChip').onclick = stationDialog;
@@ -1379,7 +1392,7 @@
     if ('serviceWorker' in navigator && (location.protocol === 'https:' || /^(localhost|127\.0\.0\.1)$/.test(location.hostname))) {
       navigator.serviceWorker.register('sw.js').catch(() => {});
     }
-    window.WTapp = { get survey() { return sv; }, get geo() { return geo; }, get sel() { return sel; }, onMeasurement, showView, get dev() { return dev; }, planView: () => planView, elevView: () => elevView };
+    window.WTapp = { orient: () => window.dispatchEvent(new Event('resize')), get survey() { return sv; }, get geo() { return geo; }, get sel() { return sel; }, onMeasurement, showView, get dev() { return dev; }, planView: () => planView, elevView: () => elevView };
   }
   start();
 })();

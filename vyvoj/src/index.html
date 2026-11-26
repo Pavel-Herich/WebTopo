@@ -15,7 +15,7 @@ html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font:15px/
 button{font:inherit;color:inherit}
 svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 #app{position:fixed;inset:0;display:flex;flex-direction:column}
-#top{display:flex;align-items:center;gap:8px;padding:6px 8px;padding-top:calc(6px + env(safe-area-inset-top));background:var(--panel);border-bottom:1px solid var(--line)}
+#top{display:flex;align-items:center;gap:8px;padding:6px max(8px,env(safe-area-inset-right)) 6px max(8px,env(safe-area-inset-left));padding-top:calc(6px + env(safe-area-inset-top));background:var(--panel);border-bottom:1px solid var(--line)}
 .ico{width:38px;height:38px;border:0;border-radius:10px;background:transparent;display:grid;place-items:center}
 .ico:active{background:var(--panel2)}
 #title{flex:1;min-width:0}
@@ -27,7 +27,7 @@ svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:2;stroke-l
 .pill.on .dot{background:var(--ok);box-shadow:0 0 8px var(--ok)}
 .pill.connecting .dot,.pill.wait .dot{background:var(--warn);animation:blink 1s infinite}
 @keyframes blink{50%{opacity:.25}}
-#stBar{display:flex;align-items:center;gap:8px;padding:6px 8px;background:var(--panel);border-bottom:1px solid var(--line)}
+#stBar{display:flex;align-items:center;gap:8px;padding:6px max(8px,env(safe-area-inset-right)) 6px max(8px,env(safe-area-inset-left));background:var(--panel);border-bottom:1px solid var(--line)}
 #stChip{display:flex;align-items:center;gap:8px;border:1px solid #2f6d8f;background:#123047;border-radius:10px;padding:7px 12px;font-size:15px}
 #stChip b{font-size:17px;color:#b3e5fc}
 #stChip .arr{color:var(--muted)}
@@ -81,10 +81,27 @@ body.sketching #tools{display:flex}
 #palette{position:absolute;left:8px;bottom:100%;margin-bottom:6px;display:flex;flex-wrap:wrap;gap:6px;padding:8px;background:var(--panel);border:1px solid var(--line);border-radius:12px;box-shadow:0 8px 24px #000a}
 #palette[hidden]{display:none}
 #palette{flex-wrap:nowrap}#palette .tb{flex:none;width:38px}
+/* na šírku (telefón): spodné panely ako zvislé stĺpce na fyzickom spodku telefónu */
+body.land #app{display:grid;grid-template-columns:minmax(0,1fr) auto auto;grid-template-rows:auto auto minmax(0,1fr)}
+body.land #top,body.land #stBar{grid-column:1/-1}
+body.land main{grid-row:3;grid-column:1;margin-left:env(safe-area-inset-left)}
+body.land #tools{grid-row:3;grid-column:2;border-top:0;border-left:1px solid var(--line);padding:6px}
+body.land.sketching #tools{display:grid;grid-template-columns:repeat(2,38px);grid-auto-rows:38px;gap:4px;align-content:start}
+body.land #tools .tb{width:38px}
+body.land #tabs{grid-row:3;grid-column:3;flex-direction:column;justify-content:flex-start;border-top:0;border-left:1px solid var(--line);padding:6px;padding-right:max(6px,env(safe-area-inset-right))}
+body.land #tabs [data-v]{flex:0 0 auto;width:46px;height:46px}
+body.land #palette{display:grid;grid-template-columns:repeat(2,38px);left:auto;right:100%;bottom:auto;top:6px;margin:0 6px 0 0}
+body.land #palette[hidden]{display:none}
+body.land-l #app{grid-template-columns:auto auto minmax(0,1fr)}
+body.land-l main{grid-column:3;margin-left:0;margin-right:env(safe-area-inset-right)}
+body.land-l #tabs{grid-column:1;border-left:0;border-right:1px solid var(--line);padding-right:6px;padding-left:max(6px,env(safe-area-inset-left))}
+body.land-l #tools{grid-column:2;border-left:0;border-right:1px solid var(--line)}
+body.land-l #palette{right:auto;left:100%;margin:0 0 0 6px}
 #stHint b{color:var(--text);font-weight:600}
 #stHint small{font-size:11px}
 #tabs{display:flex;gap:6px;padding:6px 8px;padding-bottom:calc(6px + env(safe-area-inset-bottom));background:var(--panel);border-top:1px solid var(--line)}
-#tabs [data-v]{flex:1;height:44px;border-radius:10px;border:1px solid var(--line);background:transparent;font-weight:600;color:var(--muted)}
+#tabs [data-v]{flex:1;height:42px;border-radius:10px;border:1px solid var(--line);background:transparent;color:var(--muted);display:grid;place-items:center}
+#tabs [data-v] svg{width:21px;height:21px}
 #tabs [data-v].on{background:var(--panel2);color:var(--text);border-color:#3b5163}
 #btnUndoData{border:1px solid var(--line);background:var(--panel2)}
 #btnUndoData:disabled{opacity:.35}
@@ -173,9 +190,9 @@ details summary{cursor:pointer;color:var(--muted);margin:10px 0 6px}
   </main>
   <div id="tools"></div>
   <nav id="tabs">
-    <button data-v="vData" class="on">Dáta</button>
-    <button data-v="vPlan">Pôdorys</button>
-    <button data-v="vElev">Rez</button>
+    <button data-v="vData" class="on" title="Dáta" aria-label="Dáta"></button>
+    <button data-v="vPlan" title="Pôdorys" aria-label="Pôdorys"></button>
+    <button data-v="vElev" title="Rozvinutý rez" aria-label="Rozvinutý rez"></button>
   </nav>
 </div>
 <div id="toast"></div>

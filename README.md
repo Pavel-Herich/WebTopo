@@ -45,8 +45,9 @@ Každý paket sa potvrdí (ACK). Ak spojenie vypadne, appka sa skúša znovu pri
 - **⌖** dá aktívny (posledne pridaný) bod do stredu a priblíži tak, aby bol na obrazovke celý jeho polygón. Mriežka je vždy 1 m; pri veľkom oddialení slabne a pod 3 px na meter sa nekreslí.
 - Ťuknutý bod v náčrte aj kliknutý riadok tabuľky ostanú jemne zvýraznené. Vybraný riadok je zvýraznený aj v náčrte.
 - **Ťuknutie na bod v náčrte** otvorí jeho menu: hore „Bod X“ a pod ním „z bodu Y“. Tlačidlá sú v dvoch riadkoch: otočiť ťah Y – X, pokračovať z X, premenovať a rozvinúť ‹ / › len ťah do bodu alebo všetko odtiaľ ďalej (smerom od počiatku). Čiary sú ukotvené k najbližšej stanici, takže sa pri oprave dát posunú s ňou.
+- Záložky Dáta / Pôdorys / Rez sú ikony. **Na šírku** ostanú horné lišty hore, nástroje náčrtu a záložky idú do zvislých stĺpcov na strane, kde je spodok telefónu.
 - V menu je voľba **Nezhasínať obrazovku**.
-- Dáta sa ukladajú v telefóne (IndexedDB) po každom meraní. Export si rob pravidelne.
+- **Ukladanie:** každá zmena (meranie, úprava, čiara náčrtu) sa hneď zapíše do pamäte prehliadača v telefóne (IndexedDB), pri odchode z appky ešte raz. Pád appky, vybitie či vypnutie telefónu dáta nezmažú; po otvorení sa načíta posledný prieskum. Vymazanie údajov Chromu, odinštalovanie appky alebo strata telefónu áno – preto pravidelne Export (záloha .json sa dá načítať cez Import).
 
 ## Export a import
 
@@ -66,4 +67,4 @@ Overenie: z importovaného vzorového súboru PocketTopo (Therion test `pocket-t
 - `src/app.js`, `src/index.html`: rozhranie.
 - `tools/build.py`: zostaví jeden `index.html` s vloženým kódom a `sw.js` s novou verziou cache.
 - `test/core.test.js` (`node test/core.test.js`): 22 testov jadra. Pakety DistoX, SAP6 a BRIC, ťahy a číslovanie staníc, rozvinutie, porovnanie s PocketTopo a Therionom.
-- `test/ui_test.py`: 47 testov rozhrania v Chrome s falošným DistoX2 a DistoX BLE (Playwright). Spúšťa sa `python3 test/ui_test.py <dist> <out>`. Cesta k vzorovému `Demo.txt` je v skripte.
+- `test/ui_test.py`: 53 testov rozhrania v Chrome s falošným DistoX2 a DistoX BLE (Playwright). Spúšťa sa `python3 test/ui_test.py <dist> <out>`. Cesta k vzorovému `Demo.txt` je v skripte.
