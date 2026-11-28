@@ -124,7 +124,8 @@
       v: 1, id: uid(), name: name || 'Prieskum', created: now, modified: now, date: isoDate(now),
       decl: 0, team: '', comment: '', fix: null,
       start: '1', cur: '1', next: '2', ext: 1,
-      shots: [], sketch: { plan: [], elev: [] }, log: []
+      shots: [], sketch: { plan: [], elev: [] }, log: [],
+      scraps: { plan: [{ id: 'p1', name: '1', st: null }], elev: [{ id: 'e1', name: '1', st: null }] }, act: { plan: 'p1', elev: 'e1' }
     };
   }
   function normalizeSurvey(s) {
@@ -134,6 +135,8 @@
     out.shots = (s.shots || []).map(x => Object.assign({ id: uid(), from: '', to: '', d: 0, a: 0, i: 0, ext: 1, t: out.created, c: '' }, x));
     out.log = s.log || [];
     if (!out.next) out.next = suggestNext(out, out.cur);
+    if (!s.scraps) { out.scraps = null; out.act = null; }
+    ensureScraps(out);
     return out;
   }
 
@@ -202,7 +205,8 @@
       last.t = t;
       return { kind: 'legplus', shot: last };
     }
-    const shot = { id: uid(), from: s.cur, to: '', d: m.d, a: norm360(m.a), i: m.i, ext: s.ext, t, c: '' };
+    ensureScraps(s);
+    const shot = { id: uid(), from: s.cur, to: '', d: m.d, a: norm360(m.a), i: m.i, ext: s.ext, t, c: '', sp: s.act.plan, se: s.act.elev };
     if (m.manual) shot.manual = true;
     s.shots.push(shot);
     return detectLeg(s, opt) || { kind: 'splay', shot };
@@ -215,7 +219,9 @@
     for (let a = 0; a < k; a++) for (let b = a + 1; b < k; b++) if (!shotsClose(grp[a], grp[b], opt.tolD, opt.tolA)) return null;
     const av = averageShots(grp);
     const to = s.next && s.next !== s.cur ? s.next : suggestNext(s, s.cur);
-    const leg = { id: uid(), from: s.cur, to, d: av.d, a: av.a, i: av.i, ext: s.ext, t: grp[k - 1].t, c: '', raw: grp.map(x => [x.d, x.a, x.i]) };
+    const ext = autoExt(av.a, s.ext, opt.autoExt);
+    s.ext = ext;
+    const leg = { id: uid(), from: s.cur, to, d: av.d, a: av.a, i: av.i, ext, t: grp[k - 1].t, c: '', raw: grp.map(x => [x.d, x.a, x.i]), sp: grp[k - 1].sp, se: grp[k - 1].se };
     s.shots.splice(n - k, k, leg);
     setCurrent(s, to);
     return { kind: 'leg', shot: leg };
@@ -253,16 +259,17 @@
   function splitLeg(s, id) { // ťah späť na pôvodné zámery
     const k = findShot(s, id); const sh = s.shots[k];
     if (!sh || !sh.to || !sh.raw) return;
-    const parts = sh.raw.map(r => ({ id: uid(), from: sh.from, to: '', d: r[0], a: r[1], i: r[2], ext: sh.ext, t: sh.t, c: '' }));
+    const parts = sh.raw.map(r => ({ id: uid(), from: sh.from, to: '', d: r[0], a: r[1], i: r[2], ext: sh.ext, t: sh.t, c: '', sp: sh.sp, se: sh.se }));
     s.shots.splice(k, 1, ...parts);
     if (s.cur === sh.to && !stationUsed(s, sh.to)) setCurrent(s, sh.from);
     s.modified = Date.now();
   }
-  function makeLeg(s, id, to) { // zámer → ťah
+  function makeLeg(s, id, to, mode) { // zámer → ťah
     const sh = s.shots[findShot(s, id)]; if (!sh || sh.to) return;
     to = to || (sh.from === s.cur ? s.next : suggestNext(s, sh.from));
     sh.to = to;
-    if (sh.from === s.cur) setCurrent(s, to); else s.next = suggestNext(s, s.cur);
+    sh.ext = autoExt(sh.a, s.ext, mode);
+    if (sh.from === s.cur) { s.ext = sh.ext; setCurrent(s, to); } else s.next = suggestNext(s, s.cur);
     s.modified = Date.now();
   }
   function renameStation(s, from, to) {
@@ -272,6 +279,7 @@
     for (const k of ['start', 'cur', 'next']) if (s[k] === from) s[k] = to;
     for (const p of ['plan', 'elev']) for (const st of s.sketch[p]) if (st.anc === from) st.anc = to;
     if (s.fix && s.fix.st === from) s.fix.st = to;
+    if (s.scraps) for (const p of ['plan', 'elev']) for (const sc of s.scraps[p]) if (sc.st === from) sc.st = to;
     s.modified = Date.now();
     return n;
   }
@@ -297,11 +305,126 @@
       for (const L of s.shots) if (L.to && sub.has(L.from) && sub.has(L.to)) ids.add(L.id);
     }
     dir = dir >= 0 ? 1 : -1;
-    for (const L of s.shots) if (L.to && ids.has(L.id)) L.ext = dir;
+    // smer platí pre postup polygónu od počiatku; pri spätnej zámere (ťah zapísaný opačne) sa extend otočí
+    for (const L of s.shots) if (L.to && ids.has(L.id)) L.ext = dir * legSign(geo, L);
     const legs = s.shots.filter(x => x.to);
     if (legs.length && ids.has(legs[legs.length - 1].id)) s.ext = dir;
     s.modified = Date.now();
     return ids.size;
+  }
+  // +1, ak polygón od počiatku prechádza ťahom v smere zápisu (Od → Do), −1 pri opačne zapísanom ťahu
+  function legSign(geo, L) {
+    const A = geo.pos.get(L.from), B = geo.pos.get(L.to);
+    if (!A || !B) return 1;
+    if (B.via === L.id) return 1;
+    if (A.via === L.id) return -1;
+    return A.depth <= B.depth ? 1 : -1;
+  }
+  const screenExt = (geo, L) => (L.ext >= 0 ? 1 : -1) * legSign(geo, L);
+  function setScreenExt(s, id, dir, geo) {
+    geo = geo || compute(s);
+    const L = s.shots[findShot(s, id)]; if (!L || !L.to) return;
+    dir = dir >= 0 ? 1 : -1;
+    L.ext = dir * legSign(geo, L);
+    const legs = s.shots.filter(x => x.to);
+    if (legs.length && legs[legs.length - 1] === L) s.ext = dir;
+    s.modified = Date.now();
+  }
+  // Automatické rozvinutie nového ťahu: azimut 15–165° doprava, 195–345° doľava,
+  // okolo severu a juhu (±15°) ostáva smer predchádzajúceho ťahu (inak by sa rez pri chodbe S–J lámal sem a tam).
+  function autoExt(a, prev, mode) {
+    const p = prev >= 0 ? 1 : -1;
+    if (mode !== 'azimuth') return p;
+    a = norm360(a);
+    if (a > 15 && a < 165) return 1;
+    if (a > 195 && a < 345) return -1;
+    return p;
+  }
+
+  // ---------- scrapy (zvlášť pre pôdorys a rez; poradie v zozname = zhora nadol) ----------
+  const SK = { plan: 'sp', elev: 'se' };
+  function ensureScraps(s) {
+    if (!s.scraps || !s.scraps.plan || !s.scraps.plan.length) s.scraps = { plan: [{ id: 'p1', name: '1', st: null }], elev: [{ id: 'e1', name: '1', st: null }] };
+    if (!s.act || !s.scraps.plan.some(x => x.id === s.act.plan) || !s.scraps.elev.some(x => x.id === s.act.elev)) s.act = { plan: s.scraps.plan[0].id, elev: s.scraps.elev[0].id };
+    return s;
+  }
+  const shotScrap = (s, sh, proj) => sh[SK[proj]] || s.scraps[proj][0].id;
+  const strokeScrap = (s, st, proj) => st.sc || s.scraps[proj][0].id;
+  function scrapStations(s, proj, id) {
+    const set = new Set();
+    for (const sh of s.shots) if (shotScrap(s, sh, proj) === id) { set.add(sh.from); if (sh.to) set.add(sh.to); }
+    const sc = s.scraps[proj].find(x => x.id === id);
+    if (sc) set.add(sc.st || s.start);   // pôvodný scrap začína počiatočným bodom
+    return set;
+  }
+  function addScrap(s, proj, st, where) {
+    ensureScraps(s);
+    const list = s.scraps[proj];
+    let n = 0; for (const x of list) n = Math.max(n, parseInt(x.id.slice(1), 10) || 0);
+    const sc = { id: proj[0] + (n + 1), name: String(n + 1), st };
+    const i = list.findIndex(x => x.id === s.act[proj]);
+    list.splice(where === 'above' ? Math.max(0, i) : i + 1, 0, sc);
+    s.act[proj] = sc.id;
+    s.modified = Date.now();
+    return sc;
+  }
+  // scrap, do ktorého bod patrí: scrap ťahu, ktorým bod vznikol
+  function stationScrap(s, proj, name) {
+    for (const sh of s.shots) if (sh.to === name) return shotScrap(s, sh, proj);
+    for (const sh of s.shots) if (sh.from === name) return shotScrap(s, sh, proj);
+    const sc = s.scraps[proj].find(x => x.st === name);
+    return sc ? sc.id : null;
+  }
+  // aktivuje scrap bodu, ak bod nie je v aktívnom scrape
+  function activateFor(s, name, projs) {
+    ensureScraps(s);
+    let changed = false;
+    for (const p of projs || ['plan', 'elev']) {
+      if (scrapStations(s, p, s.act[p]).has(name)) continue;
+      const id = stationScrap(s, p, name);
+      if (id && id !== s.act[p]) { s.act[p] = id; changed = true; }
+    }
+    return changed;
+  }
+  function scrapNames(s, proj, base) {
+    const list = s.scraps[proj];
+    return list.map(sc => ({ sc, name: list.length > 1 ? base + sc.name : base }));
+  }
+
+  // ---------- viac riadkov → jeden ťah ----------
+  function shotsSpread(list) {
+    let dd = 0, da = 0;
+    for (let a = 0; a < list.length; a++) for (let b = a + 1; b < list.length; b++) {
+      dd = Math.max(dd, Math.abs(list[a].d - list[b].d)); da = Math.max(da, angleBetween(list[a], list[b]));
+    }
+    return { dd, da };
+  }
+  function mergeMeasurements(sel) {
+    const meas = [];
+    for (const x of sel) { if (x.raw && x.raw.length) for (const r of x.raw) meas.push({ d: r[0], a: r[1], i: r[2] }); else meas.push({ d: x.d, a: x.a, i: x.i }); }
+    return meas;
+  }
+  function checkMerge(s, ids) {
+    const set = new Set(ids), sel = s.shots.filter(x => set.has(x.id));
+    if (sel.length < 2) throw new Error('Označ aspoň 2 riadky');
+    if (sel.some(x => x.from !== sel[0].from)) throw new Error('Označené riadky musia mať rovnaké Od');
+    if (sel.filter(x => x.to).length > 1) throw new Error('Medzi označenými môže byť najviac jeden ťah');
+    return { sel, meas: mergeMeasurements(sel) };
+  }
+  function mergeShots(s, ids, opt) {
+    opt = opt || {};
+    const { sel, meas } = checkMerge(s, ids);
+    const from = sel[0].from, leg0 = sel.find(x => x.to), av = averageShots(meas);
+    const to = leg0 ? leg0.to : (from === s.cur ? s.next : suggestNext(s, from));
+    const ext = leg0 ? leg0.ext : autoExt(av.a, s.ext, opt.autoExt);
+    const last = sel[sel.length - 1];
+    const leg = { id: uid(), from, to, d: av.d, a: av.a, i: av.i, ext, t: last.t, c: sel.map(x => x.c).filter(Boolean).join('; '),
+      raw: meas.map(m => [m.d, m.a, m.i]), sp: sel[0].sp, se: sel[0].se };
+    const set = new Set(ids);
+    s.shots = s.shots.flatMap(x => x === last ? [leg] : set.has(x.id) ? [] : [x]);
+    if (!leg0 && from === s.cur) { s.ext = ext; setCurrent(s, to); } else s.next = suggestNext(s, s.cur);
+    s.modified = Date.now();
+    return leg;
   }
 
   function stats(s) {
@@ -329,7 +452,7 @@
     for (const st of starts) {
       if (!st || pos.has(st)) continue;
       if (!adj.has(st) && !splays.some(S => S.from === st) && st !== s.start) continue;
-      pos.set(st, { x: 0, y: 0, z: 0, ex: 0, comp });
+      pos.set(st, { x: 0, y: 0, z: 0, ex: 0, comp, depth: 0 });
       const q = [st];
       while (q.length) {
         const n = q.shift(), P = pos.get(n);
@@ -337,7 +460,7 @@
           const o = fwd ? L.to : L.from;
           if (pos.has(o)) continue;
           const v = vec(L), sg = fwd ? 1 : -1, e = L.ext >= 0 ? 1 : -1;
-          pos.set(o, { x: P.x + sg * v.dx, y: P.y + sg * v.dy, z: P.z + sg * v.dz, ex: P.ex + sg * e * v.h, comp, pn: n, via: L.id });
+          pos.set(o, { x: P.x + sg * v.dx, y: P.y + sg * v.dy, z: P.z + sg * v.dz, ex: P.ex + sg * e * v.h, comp, pn: n, via: L.id, depth: P.depth + 1 });
           q.push(o);
         }
       }
@@ -366,7 +489,7 @@
   const projXY = (P, proj) => (proj === 'plan' ? [P.x, P.y] : [P.ex, P.z]);
 
   // Ťahy náčrtu sú ukotvené k najbližšej stanici – pri oprave dát sa posúvajú so stanicou.
-  function makeStroke(abs, col, geo, proj, width) {
+  function makeStroke(abs, col, geo, proj, width, sc) {
     let bx = 0, by = 0; const n = abs.length / 2;
     for (let k = 0; k < abs.length; k += 2) { bx += abs[k]; by += abs[k + 1]; }
     bx /= n; by /= n;
@@ -377,6 +500,7 @@
     }
     const pts = abs.map((v, k) => +(v - o[k & 1]).toFixed(3));
     const st = { id: uid(), col, anc, o: [+o[0].toFixed(3), +o[1].toFixed(3)], pts };
+    if (sc) st.sc = sc;
     if (width) st.w = width;
     return st;
   }
@@ -492,13 +616,38 @@
     }
     // mierka v hlavičke: Therion ju pri scrape so stanicami nepotrebuje, PreTherion z nej berie mierku kresby
     const sc = ' -scale [0 0 ' + fmt(SCRAP_SCALE_M * k, 3) + ' 0 0 0 ' + SCRAP_SCALE_M + ' 0 m]';
-    L.push('', '', 'scrap ' + scrapName + ' -projection ' + (proj === 'plan' ? 'plan' : 'extended') + sc);
-    for (const [n, P] of geo.pos) {
-      const q = projXY(P, proj);
-      L.push('  point ' + fmt(q[0] * k - g.x0, 2) + ' ' + fmt(q[1] * k - g.y0, 2) + ' station -name ' + n);
+    ensureScraps(s);
+    for (const { sc: scr, name } of scrapNames(s, proj, scrapName)) {
+      const sts = scrapStations(s, proj, scr.id);
+      L.push('', '', 'scrap ' + name + ' -projection ' + (proj === 'plan' ? 'plan' : 'extended') + sc);
+      for (const [n, P] of geo.pos) {
+        if (!sts.has(n)) continue;
+        const q = projXY(P, proj);
+        L.push('  point ' + fmt(q[0] * k - g.x0, 2) + ' ' + fmt(q[1] * k - g.y0, 2) + ' station -name ' + n);
+      }
+      L.push('endscrap');
     }
-    L.push('endscrap', '');
+    L.push('');
     return L.join('\n');
+  }
+
+  // hlavný súbor: survey s centreline, scrapmi a mapami; scrapy zhora nadol oddelené break
+  function toMain(s, b) {
+    ensureScraps(s);
+    const L = ['encoding  utf-8', '# ' + s.name + ' – hlavný súbor (WebTopo)', 'survey ' + b + ' -title "' + String(s.name).replace(/"/g, '') + '"',
+      '  input ' + b + '.th', '  input ' + b + '_p.th2', '  input ' + b + '_e.th2', ''];
+    for (const [proj, key, pj] of [['plan', 'p', 'plan'], ['elev', 'e', 'extended']]) {
+      L.push('  map ' + b + '_m' + key + ' -projection ' + pj);
+      scrapNames(s, proj, b + '_' + key).forEach((x, i) => { if (i) L.push('    break'); L.push('    ' + x.name); });
+      L.push('  endmap', '');
+    }
+    L.push('endsurvey');
+    return L.join('\n') + '\n';
+  }
+  function toThconfig(s, b) {
+    return ['encoding  utf-8', 'source ' + b + '_hlavny.th', '',
+      'select ' + b + '_mp@' + b, 'select ' + b + '_me@' + b, '',
+      'export map -projection plan -o ' + b + '_podorys.pdf', 'export map -projection extended -o ' + b + '_rez.pdf', 'export model -o ' + b + '.lox', ''].join('\n');
   }
 
   function safeName(n) {
@@ -512,6 +661,8 @@
       { name: b + '_e.xvi', text: toXVI(s, 'elev') },
       { name: b + '_p.th2', text: toTh2(s, 'plan', b + '_p.xvi', b + '_p') },
       { name: b + '_e.th2', text: toTh2(s, 'elev', b + '_e.xvi', b + '_e') },
+      { name: b + '_hlavny.th', text: toMain(s, b) },
+      { name: b + '.thconfig', text: toThconfig(s, b) },
       { name: b + '_pockettopo.txt', text: toPocketTopo(s) },
       { name: b + '.webtopo.json', text: JSON.stringify(s) }
     ];
@@ -622,8 +773,9 @@
     norm360, uid, isoDate, fmt, fmtAz, hex,
     distoxAck, decodeDistoX, DistoXStream, distoxBleFrame, decodeDistoXBle, decodeSap6, decodeBricPrimary, decodeBricMeta, decodeBricErr,
     newSurvey, normalizeSurvey, stationNames, suggestNext, setCurrent, angleBetween, shotsClose, averageShots,
-    addMeasurement, detectLeg, deleteShot, reverseShot, toggleExt, setLegExt, splitLeg, makeLeg, renameStation, stats, incoming, setExtend,
+    addMeasurement, detectLeg, deleteShot, reverseShot, toggleExt, setLegExt, splitLeg, makeLeg, renameStation, stats, incoming, setExtend, legSign, screenExt, setScreenExt, autoExt,
+    ensureScraps, shotScrap, strokeScrap, scrapStations, addScrap, stationScrap, activateFor, scrapNames, shotsSpread, checkMerge, mergeMeasurements, mergeShots,
     compute, projXY, makeStroke, strokeAbs,
-    toTherion, toPocketTopo, toXVI, toTh2, therionBundle, safeName, fromPocketTopo, fromJSON, crc32, zip, Simulator
+    toTherion, toPocketTopo, toXVI, toTh2, toMain, toThconfig, therionBundle, safeName, fromPocketTopo, fromJSON, crc32, zip, Simulator
   };
 });

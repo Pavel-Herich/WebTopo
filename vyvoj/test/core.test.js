@@ -214,6 +214,66 @@ ok('Rozvinutie: ťah do bodu a všetko odtiaľ ďalej', () => {
   WT.setExtend(s, '503.0', 1, true);
   assert(s.shots.filter(x => x.to).every(x => x.ext === 1), 'z počiatku = celý prieskum');
 });
+ok('Rozvinutie podľa obrazovky aj pri spätnej zámere', () => {
+  const s = WT.newSurvey('t');
+  for (let k = 0; k < 3; k++) WT.addMeasurement(s, { d: 5, a: 90, i: 0 });            // 1 → 2 (na východ)
+  s.shots.push({ id: 'b', from: '3', to: '2', d: 4, a: 270, i: 0, ext: 1, t: Date.now(), c: '' }); // spätná zámera z 3 na 2
+  let g = WT.compute(s);
+  const L = s.shots.find(x => x.id === 'b');
+  assert.strictEqual(WT.legSign(g, L), -1);
+  WT.setScreenExt(s, 'b', 1);                       // na obrazovke 2 → 3 doprava
+  g = WT.compute(s);
+  assert.strictEqual(L.ext, -1, 'v Therione extend left pre riadok 3 2');
+  assert(g.pos.get('3').ex > g.pos.get('2').ex, 'bod 3 je napravo od 2');
+  assert.strictEqual(WT.screenExt(g, L), 1);
+  WT.setExtend(s, '2', -1, true);                    // všetko od 2 doľava
+  g = WT.compute(s);
+  assert(g.pos.get('3').ex < g.pos.get('2').ex && g.pos.get('2').ex < g.pos.get('1').ex);
+});
+ok('Automatické rozvinutie podľa azimutu (±15° okolo S a J ponechá smer)', () => {
+  assert.strictEqual(WT.autoExt(90, -1, 'azimuth'), 1); assert.strictEqual(WT.autoExt(250, 1, 'azimuth'), -1);
+  assert.strictEqual(WT.autoExt(5, -1, 'azimuth'), -1); assert.strictEqual(WT.autoExt(355, 1, 'azimuth'), 1);
+  assert.strictEqual(WT.autoExt(185, -1, 'azimuth'), -1); assert.strictEqual(WT.autoExt(250, 1, 'prev'), 1);
+  const s = WT.newSurvey('t');
+  for (let k = 0; k < 3; k++) WT.addMeasurement(s, { d: 5, a: 250, i: 0 }, { autoExt: 'azimuth' });
+  assert.strictEqual(s.shots[0].ext, -1); assert.strictEqual(s.ext, -1);
+});
+ok('Scrapy: nový pod aktívnym, nové merania v ňom, export s break', () => {
+  const s = WT.newSurvey('S');
+  for (let k = 0; k < 3; k++) WT.addMeasurement(s, { d: 5, a: 90, i: 0 });
+  const sc = WT.addScrap(s, 'plan', '2', 'below');
+  assert.deepStrictEqual(s.scraps.plan.map(x => x.id), ['p1', 'p2']); assert.strictEqual(s.act.plan, 'p2');
+  const up = WT.addScrap(s, 'plan', '2', 'above');
+  assert.deepStrictEqual(s.scraps.plan.map(x => x.id), ['p1', 'p3', 'p2']);
+  s.act.plan = 'p2';
+  for (let k = 0; k < 3; k++) WT.addMeasurement(s, { d: 4, a: 0, i: 0 });
+  const leg = s.shots[s.shots.length - 1];
+  assert.strictEqual(leg.sp, 'p2'); assert.strictEqual(leg.se, 'e1');
+  assert.deepStrictEqual([...WT.scrapStations(s, 'plan', 'p2')].sort(), ['2', '3']);
+  assert.deepStrictEqual([...WT.scrapStations(s, 'plan', 'p1')].sort(), ['1', '2']);
+  const th2 = WT.toTh2(s, 'plan', 'S_p.xvi', 'S_p');
+  assert.deepStrictEqual(th2.match(/^scrap \S+/gm), ['scrap S_p1', 'scrap S_p3', 'scrap S_p2']);
+  const main = WT.toMain(s, 'S');
+  assert(/map S_mp -projection plan\n    S_p1\n    break\n    S_p3\n    break\n    S_p2\n  endmap/.test(main), main);
+  assert(/map S_me -projection extended\n    S_e\n  endmap/.test(main));
+  // pokračovanie z bodu iného scrapu ho aktivuje
+  assert.strictEqual(WT.activateFor(s, '1', ['plan']), true); assert.strictEqual(s.act.plan, 'p1');
+  assert.strictEqual(WT.activateFor(s, '2', ['plan']), false, 'zdieľaný bod nemení aktívny scrap');
+});
+ok('Viac riadkov → ťah, kontrola rozdielov a chyby', () => {
+  const s = WT.newSurvey('t');
+  WT.addMeasurement(s, { d: 3.00, a: 100, i: 1 }); WT.addMeasurement(s, { d: 3.02, a: 100.5, i: 1.2 }); WT.addMeasurement(s, { d: 1, a: 10, i: 0 });
+  const ids = [s.shots[0].id, s.shots[1].id];
+  const { meas } = WT.checkMerge(s, ids);
+  const sp = WT.shotsSpread(meas);
+  near(sp.dd, 0.02, 1e-9); assert(sp.da < 1);
+  const leg = WT.mergeShots(s, ids, { autoExt: 'azimuth' });
+  assert.strictEqual(leg.from + '>' + leg.to, '1>2'); near(leg.d, 3.01, 1e-9); assert.strictEqual(leg.raw.length, 2);
+  assert.strictEqual(s.shots.length, 2); assert.strictEqual(s.shots[0], leg); assert.strictEqual(s.cur, '2');
+  assert.throws(() => WT.checkMerge(s, [s.shots[0].id]), /aspoň 2/);
+  WT.addMeasurement(s, { d: 2, a: 50, i: 0 });          // zámer z 2
+  assert.throws(() => WT.checkMerge(s, [s.shots[0].id, s.shots[2].id]), /rovnaké Od/);
+});
 ok('ZIP balík sa dá rozbaliť', () => {
   const files = WT.therionBundle(demo);
   const z = WT.zip(files.map(f => ({ name: f.name, text: f.text })));

@@ -44,6 +44,9 @@ Webová aplikácia (PWA) v štýle PocketTopo pre Android. Priamo cez Bluetooth 
 - **Náčrt** je na celú obrazovku (horné lišty sú len v tabuľke): predvolene posun, dva prsty zväčšujú, + a − priblížia a oddialia. Pero (prvé ťuknutie zapne pero, druhé otvorí farby) kreslí. Guma maže celé čiary, ↶ vráti krok.
 - **⌖** dá aktívny (posledne pridaný) bod do stredu a priblíži tak, aby bol na obrazovke celý jeho polygón. Mriežka je vždy 1 m; pri veľkom oddialení slabne a pod 3 px na meter sa nekreslí.
 - Ťuknutý bod v náčrte aj kliknutý riadok tabuľky ostanú jemne zvýraznené. Vybraný riadok je zvýraznený aj v náčrte.
+- **Scrapy:** v menu bodu v náčrte je **+ Scrap**. Vyberieš, či bude nový scrap nad alebo pod aktívnym. Doterajšie body a kresba sa zošednú, merania aj kresba ďalej patria novému scrapu a pokračuje sa z toho bodu. Krátky klik na zošednutý bod nič neurobí, dlhé podržanie prepne na jeho scrap a otvorí menu. Prepne aj „Pokračovať z bodu“, či už z tabuľky, alebo z náčrtu. Export dá každý scrap zvlášť do .th2 a v `_hlavny.th` ich zoradí zhora nadol cez `break`. Therion kreslí prvú skupinu navrchu.
+- **Rozvinutie:** ‹ › sa riadi smerom polygónu na obrazovke (od predošlého bodu k tomuto), aj pri spätnej zámere zapísanej opačne. Do Therionu sa prepočíta na `extend` podľa zápisu riadku. **Automaticky** dostane nový ťah azimut 15–165° doprava a 195–345° doľava. Okolo severu a juhu (±15°) ostane smer predošlého ťahu, aby sa rez pri chodbe S–J nelámal sem a tam. V Nastaveniach sa dá prepnúť na „ako predošlý ťah“.
+- **Viac riadkov:** dlhé podržanie šípky ▸ (alebo Označiť v menu) zapne označovanie. Z 2 a viac meraní s rovnakým Od spravíš ťah s novým bodom; pri rozdieloch nad toleranciou appka upozorní. Označené riadky sa dajú aj vymazať, po potvrdení.
 - **Ťuknutie na bod v náčrte** otvorí jeho menu: hore „Bod X“ a pod ním „z bodu Y“. Tlačidlá sú v dvoch riadkoch: otočiť ťah Y – X, pokračovať z X, premenovať a rozvinúť ‹ / › len ťah do bodu alebo všetko odtiaľ ďalej (smerom od počiatku). Čiary sú ukotvené k najbližšej stanici, takže sa pri oprave dát posunú s ňou.
 - Záložky Dáta / Pôdorys / Rez sú ikony. **Na šírku** ostanú horné lišty hore, nástroje náčrtu a záložky idú do zvislých stĺpcov na strane, kde je spodok telefónu.
 - V menu je voľba **Nezhasínať obrazovku**.
@@ -55,6 +58,7 @@ Webová aplikácia (PWA) v štýle PocketTopo pre Android. Priamo cez Bluetooth 
   - `.th`: centreline, `data normal from to length compass clino`, zámery ako `-`, `extend left/right`, dátum, tím, deklinácia a fix.
   - `_p.th2` / `_e.th2`: scrap s bodmi staníc, mierkou v hlavičke (`-scale [0 0 787.402 0 0 0 10 0 m]`) a vloženým `.xvi` podkladom (náčrt, ťahy, zámery, mriežka 1 m) pre xtherion a PreTherion.
   - `.xvi` je v 78,74 jednotkách na meter, rovnako ako PocketTopo podklad. PreTherion z neho aj zo scrapov načíta mierku 0,0127 m na jednotku.
+  - `_hlavny.th` a `.thconfig`: survey so vstupmi a mapami (scrapy cez `break`), stačí spustiť `therion <názov>.thconfig`.
   - `_pockettopo.txt`: rovnaký formát ako „Export Therion“ z PocketTopo, takže xtherion → Import PocketTopo funguje ako doteraz.
   - `.webtopo.json`: úplná záloha.
 - **Import:** PocketTopo `.txt` (Therion export, aj s náčrtom) a záloha `.json`. Binárny `.top` zatiaľ nie.
@@ -66,5 +70,5 @@ Overenie: z importovaného vzorového súboru PocketTopo (Therion test `pocket-t
 - `src/core.js`: protokoly, merania, geometria, exporty a importy (bez UI, testovateľné v Node).
 - `src/app.js`, `src/index.html`: rozhranie.
 - `tools/build.py`: zostaví jeden `index.html` s vloženým kódom a `sw.js` s novou verziou cache.
-- `test/core.test.js` (`node test/core.test.js`): 23 testov jadra. Pakety DistoX, SAP6 a BRIC, ťahy a číslovanie staníc, rozvinutie, porovnanie s PocketTopo a Therionom.
-- `test/ui_test.py`: 58 testov rozhrania v Chrome s falošným DistoX2 a DistoX BLE (Playwright). Spúšťa sa `python3 test/ui_test.py <dist> <out>`. Cesta k vzorovému `Demo.txt` je v skripte.
+- `test/core.test.js` (`node test/core.test.js`): 27 testov jadra. Pakety DistoX, SAP6 a BRIC, ťahy a číslovanie staníc, rozvinutie, porovnanie s PocketTopo a Therionom.
+- `test/ui_test.py`: 74 testov rozhrania v Chrome s falošným DistoX2 a DistoX BLE (Playwright). Spúšťa sa `python3 test/ui_test.py <dist> <out>`. Cesta k vzorovému `Demo.txt` je v skripte.

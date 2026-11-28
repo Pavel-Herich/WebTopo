@@ -61,6 +61,11 @@ tr.leg td{color:var(--leg)}
 tr.leg td:nth-child(3),tr.leg td:nth-child(4),tr.leg td:nth-child(5){font-weight:600}
 tr.cur td.st{color:#b3e5fc}
 tr.sel td{background:rgba(79,195,247,.13)}
+tr.msel td{background:rgba(255,183,77,.18)}
+tr.msel td.mn{box-shadow:inset 3px 0 0 var(--warn);color:var(--warn)}
+#mbar{position:absolute;left:8px;right:8px;bottom:8px;z-index:3;display:flex;gap:6px;align-items:center;padding:8px;border-radius:12px;background:var(--panel);border:1px solid var(--warn);box-shadow:0 6px 20px #000a}
+#mbar[hidden]{display:none}#mCount{flex:1;font-weight:650;padding-left:4px}
+#tblWrap.mpad{padding-bottom:70px}
 tr.sel td:first-child{box-shadow:inset 3px 0 0 var(--acc)}
 tr.new{animation:flash 1.6s ease-out}
 @keyframes flash{0%{background:#2e7d32}100%{background:transparent}}
@@ -185,6 +190,7 @@ details summary{cursor:pointer;color:var(--muted);margin:10px 0 6px}
         <tbody id="tentry"><tr class="entry"><td class="mn"><button id="enAdd" class="add" aria-label="Pridať meranie">+</button></td><td class="st" id="enFrom" title="Aktuálna stanica"></td><td><input id="enTo" placeholder="–" autocomplete="off" autocapitalize="off" enterkeyhint="next" aria-label="Do"></td><td><input id="enD" inputmode="decimal" autocomplete="off" enterkeyhint="next" aria-label="Dĺžka"></td><td><input id="enA" inputmode="decimal" autocomplete="off" enterkeyhint="next" aria-label="Azimut"></td><td><input id="enI" inputmode="decimal" autocomplete="off" enterkeyhint="done" aria-label="Sklon"></td><td class="ex" id="enExt" title="Smer nového ťahu v reze"></td></tr></tbody></table>
         <div id="empty"><p>Zatiaľ žiadne merania. Pripoj prístroj alebo zapíš meranie do posledného riadku.</p><button class="btn pri" id="emptyDev">Pripojiť prístroj</button></div>
       </div>
+      <div id="mbar" hidden><span id="mCount"></span><button class="btn sm pri" id="mLeg">Ťah z označených</button><button class="btn sm bad" id="mDel">Vymazať</button><button class="btn sm" id="mX" aria-label="Zrušiť označenie">✕</button></div>
     </section>
     <section id="vPlan" class="view"><canvas id="cvPlan"></canvas></section>
     <section id="vElev" class="view"><canvas id="cvElev"></canvas></section>

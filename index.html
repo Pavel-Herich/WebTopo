@@ -8,7 +8,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon-192.png">
 <title>WebTopo</title>
-<meta name="build" content="20261126-1739">
+<meta name="build" content="20261128-1312">
 <style>
 :root{--bg:#0f1720;--panel:#17212b;--panel2:#1e2a36;--line:#2a3846;--text:#e9eef2;--muted:#8fa0ae;--acc:#4fc3f7;--pri:#0288d1;--ok:#66bb6a;--warn:#ffb74d;--bad:#e57373;--leg:#ffffff}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -62,6 +62,11 @@ tr.leg td{color:var(--leg)}
 tr.leg td:nth-child(3),tr.leg td:nth-child(4),tr.leg td:nth-child(5){font-weight:600}
 tr.cur td.st{color:#b3e5fc}
 tr.sel td{background:rgba(79,195,247,.13)}
+tr.msel td{background:rgba(255,183,77,.18)}
+tr.msel td.mn{box-shadow:inset 3px 0 0 var(--warn);color:var(--warn)}
+#mbar{position:absolute;left:8px;right:8px;bottom:8px;z-index:3;display:flex;gap:6px;align-items:center;padding:8px;border-radius:12px;background:var(--panel);border:1px solid var(--warn);box-shadow:0 6px 20px #000a}
+#mbar[hidden]{display:none}#mCount{flex:1;font-weight:650;padding-left:4px}
+#tblWrap.mpad{padding-bottom:70px}
 tr.sel td:first-child{box-shadow:inset 3px 0 0 var(--acc)}
 tr.new{animation:flash 1.6s ease-out}
 @keyframes flash{0%{background:#2e7d32}100%{background:transparent}}
@@ -186,6 +191,7 @@ details summary{cursor:pointer;color:var(--muted);margin:10px 0 6px}
         <tbody id="tentry"><tr class="entry"><td class="mn"><button id="enAdd" class="add" aria-label="Pridať meranie">+</button></td><td class="st" id="enFrom" title="Aktuálna stanica"></td><td><input id="enTo" placeholder="–" autocomplete="off" autocapitalize="off" enterkeyhint="next" aria-label="Do"></td><td><input id="enD" inputmode="decimal" autocomplete="off" enterkeyhint="next" aria-label="Dĺžka"></td><td><input id="enA" inputmode="decimal" autocomplete="off" enterkeyhint="next" aria-label="Azimut"></td><td><input id="enI" inputmode="decimal" autocomplete="off" enterkeyhint="done" aria-label="Sklon"></td><td class="ex" id="enExt" title="Smer nového ťahu v reze"></td></tr></tbody></table>
         <div id="empty"><p>Zatiaľ žiadne merania. Pripoj prístroj alebo zapíš meranie do posledného riadku.</p><button class="btn pri" id="emptyDev">Pripojiť prístroj</button></div>
       </div>
+      <div id="mbar" hidden><span id="mCount"></span><button class="btn sm pri" id="mLeg">Ťah z označených</button><button class="btn sm bad" id="mDel">Vymazať</button><button class="btn sm" id="mX" aria-label="Zrušiť označenie">✕</button></div>
     </section>
     <section id="vPlan" class="view"><canvas id="cvPlan"></canvas></section>
     <section id="vElev" class="view"><canvas id="cvElev"></canvas></section>
@@ -325,7 +331,8 @@ details summary{cursor:pointer;color:var(--muted);margin:10px 0 6px}
       v: 1, id: uid(), name: name || 'Prieskum', created: now, modified: now, date: isoDate(now),
       decl: 0, team: '', comment: '', fix: null,
       start: '1', cur: '1', next: '2', ext: 1,
-      shots: [], sketch: { plan: [], elev: [] }, log: []
+      shots: [], sketch: { plan: [], elev: [] }, log: [],
+      scraps: { plan: [{ id: 'p1', name: '1', st: null }], elev: [{ id: 'e1', name: '1', st: null }] }, act: { plan: 'p1', elev: 'e1' }
     };
   }
   function normalizeSurvey(s) {
@@ -335,6 +342,8 @@ details summary{cursor:pointer;color:var(--muted);margin:10px 0 6px}
     out.shots = (s.shots || []).map(x => Object.assign({ id: uid(), from: '', to: '', d: 0, a: 0, i: 0, ext: 1, t: out.created, c: '' }, x));
     out.log = s.log || [];
     if (!out.next) out.next = suggestNext(out, out.cur);
+    if (!s.scraps) { out.scraps = null; out.act = null; }
+    ensureScraps(out);
     return out;
   }
 
@@ -403,7 +412,8 @@ details summary{cursor:pointer;color:var(--muted);margin:10px 0 6px}
       last.t = t;
       return { kind: 'legplus', shot: last };
     }
-    const shot = { id: uid(), from: s.cur, to: '', d: m.d, a: norm360(m.a), i: m.i, ext: s.ext, t, c: '' };
+    ensureScraps(s);
+    const shot = { id: uid(), from: s.cur, to: '', d: m.d, a: norm360(m.a), i: m.i, ext: s.ext, t, c: '', sp: s.act.plan, se: s.act.elev };
     if (m.manual) shot.manual = true;
     s.shots.push(shot);
     return detectLeg(s, opt) || { kind: 'splay', shot };
@@ -416,7 +426,9 @@ details summary{cursor:pointer;color:var(--muted);margin:10px 0 6px}
     for (let a = 0; a < k; a++) for (let b = a + 1; b < k; b++) if (!shotsClose(grp[a], grp[b], opt.tolD, opt.tolA)) return null;
     const av = averageShots(grp);
     const to = s.next && s.next !== s.cur ? s.next : suggestNext(s, s.cur);
-    const leg = { id: uid(), from: s.cur, to, d: av.d, a: av.a, i: av.i, ext: s.ext, t: grp[k - 1].t, c: '', raw: grp.map(x => [x.d, x.a, x.i]) };
+    const ext = autoExt(av.a, s.ext, opt.autoExt);
+    s.ext = ext;
+    const leg = { id: uid(), from: s.cur, to, d: av.d, a: av.a, i: av.i, ext, t: grp[k - 1].t, c: '', raw: grp.map(x => [x.d, x.a, x.i]), sp: grp[k - 1].sp, se: grp[k - 1].se };
     s.shots.splice(n - k, k, leg);
     setCurrent(s, to);
     return { kind: 'leg', shot: leg };
@@ -454,16 +466,17 @@ details summary{cursor:pointer;color:var(--muted);margin:10px 0 6px}
   function splitLeg(s, id) { // ťah späť na pôvodné zámery
     const k = findShot(s, id); const sh = s.shots[k];
     if (!sh || !sh.to || !sh.raw) return;
-    const parts = sh.raw.map(r => ({ id: uid(), from: sh.from, to: '', d: r[0], a: r[1], i: r[2], ext: sh.ext, t: sh.t, c: '' }));
+    const parts = sh.raw.map(r => ({ id: uid(), from: sh.from, to: '', d: r[0], a: r[1], i: r[2], ext: sh.ext, t: sh.t, c: '', sp: sh.sp, se: sh.se }));
     s.shots.splice(k, 1, ...parts);
     if (s.cur === sh.to && !stationUsed(s, sh.to)) setCurrent(s, sh.from);
     s.modified = Date.now();
   }
-  function makeLeg(s, id, to) { // zámer → ťah
+  function makeLeg(s, id, to, mode) { // zámer → ťah
     const sh = s.shots[findShot(s, id)]; if (!sh || sh.to) return;
     to = to || (sh.from === s.cur ? s.next : suggestNext(s, sh.from));
     sh.to = to;
-    if (sh.from === s.cur) setCurrent(s, to); else s.next = suggestNext(s, s.cur);
+    sh.ext = autoExt(sh.a, s.ext, mode);
+    if (sh.from === s.cur) { s.ext = sh.ext; setCurrent(s, to); } else s.next = suggestNext(s, s.cur);
     s.modified = Date.now();
   }
   function renameStation(s, from, to) {
@@ -473,6 +486,7 @@ details summary{cursor:pointer;color:var(--muted);margin:10px 0 6px}
     for (const k of ['start', 'cur', 'next']) if (s[k] === from) s[k] = to;
     for (const p of ['plan', 'elev']) for (const st of s.sketch[p]) if (st.anc === from) st.anc = to;
     if (s.fix && s.fix.st === from) s.fix.st = to;
+    if (s.scraps) for (const p of ['plan', 'elev']) for (const sc of s.scraps[p]) if (sc.st === from) sc.st = to;
     s.modified = Date.now();
     return n;
   }
@@ -498,11 +512,126 @@ details summary{cursor:pointer;color:var(--muted);margin:10px 0 6px}
       for (const L of s.shots) if (L.to && sub.has(L.from) && sub.has(L.to)) ids.add(L.id);
     }
     dir = dir >= 0 ? 1 : -1;
-    for (const L of s.shots) if (L.to && ids.has(L.id)) L.ext = dir;
+    // smer platí pre postup polygónu od počiatku; pri spätnej zámere (ťah zapísaný opačne) sa extend otočí
+    for (const L of s.shots) if (L.to && ids.has(L.id)) L.ext = dir * legSign(geo, L);
     const legs = s.shots.filter(x => x.to);
     if (legs.length && ids.has(legs[legs.length - 1].id)) s.ext = dir;
     s.modified = Date.now();
     return ids.size;
+  }
+  // +1, ak polygón od počiatku prechádza ťahom v smere zápisu (Od → Do), −1 pri opačne zapísanom ťahu
+  function legSign(geo, L) {
+    const A = geo.pos.get(L.from), B = geo.pos.get(L.to);
+    if (!A || !B) return 1;
+    if (B.via === L.id) return 1;
+    if (A.via === L.id) return -1;
+    return A.depth <= B.depth ? 1 : -1;
+  }
+  const screenExt = (geo, L) => (L.ext >= 0 ? 1 : -1) * legSign(geo, L);
+  function setScreenExt(s, id, dir, geo) {
+    geo = geo || compute(s);
+    const L = s.shots[findShot(s, id)]; if (!L || !L.to) return;
+    dir = dir >= 0 ? 1 : -1;
+    L.ext = dir * legSign(geo, L);
+    const legs = s.shots.filter(x => x.to);
+    if (legs.length && legs[legs.length - 1] === L) s.ext = dir;
+    s.modified = Date.now();
+  }
+  // Automatické rozvinutie nového ťahu: azimut 15–165° doprava, 195–345° doľava,
+  // okolo severu a juhu (±15°) ostáva smer predchádzajúceho ťahu (inak by sa rez pri chodbe S–J lámal sem a tam).
+  function autoExt(a, prev, mode) {
+    const p = prev >= 0 ? 1 : -1;
+    if (mode !== 'azimuth') return p;
+    a = norm360(a);
+    if (a > 15 && a < 165) return 1;
+    if (a > 195 && a < 345) return -1;
+    return p;
+  }
+
+  // ---------- scrapy (zvlášť pre pôdorys a rez; poradie v zozname = zhora nadol) ----------
+  const SK = { plan: 'sp', elev: 'se' };
+  function ensureScraps(s) {
+    if (!s.scraps || !s.scraps.plan || !s.scraps.plan.length) s.scraps = { plan: [{ id: 'p1', name: '1', st: null }], elev: [{ id: 'e1', name: '1', st: null }] };
+    if (!s.act || !s.scraps.plan.some(x => x.id === s.act.plan) || !s.scraps.elev.some(x => x.id === s.act.elev)) s.act = { plan: s.scraps.plan[0].id, elev: s.scraps.elev[0].id };
+    return s;
+  }
+  const shotScrap = (s, sh, proj) => sh[SK[proj]] || s.scraps[proj][0].id;
+  const strokeScrap = (s, st, proj) => st.sc || s.scraps[proj][0].id;
+  function scrapStations(s, proj, id) {
+    const set = new Set();
+    for (const sh of s.shots) if (shotScrap(s, sh, proj) === id) { set.add(sh.from); if (sh.to) set.add(sh.to); }
+    const sc = s.scraps[proj].find(x => x.id === id);
+    if (sc) set.add(sc.st || s.start);   // pôvodný scrap začína počiatočným bodom
+    return set;
+  }
+  function addScrap(s, proj, st, where) {
+    ensureScraps(s);
+    const list = s.scraps[proj];
+    let n = 0; for (const x of list) n = Math.max(n, parseInt(x.id.slice(1), 10) || 0);
+    const sc = { id: proj[0] + (n + 1), name: String(n + 1), st };
+    const i = list.findIndex(x => x.id === s.act[proj]);
+    list.splice(where === 'above' ? Math.max(0, i) : i + 1, 0, sc);
+    s.act[proj] = sc.id;
+    s.modified = Date.now();
+    return sc;
+  }
+  // scrap, do ktorého bod patrí: scrap ťahu, ktorým bod vznikol
+  function stationScrap(s, proj, name) {
+    for (const sh of s.shots) if (sh.to === name) return shotScrap(s, sh, proj);
+    for (const sh of s.shots) if (sh.from === name) return shotScrap(s, sh, proj);
+    const sc = s.scraps[proj].find(x => x.st === name);
+    return sc ? sc.id : null;
+  }
+  // aktivuje scrap bodu, ak bod nie je v aktívnom scrape
+  function activateFor(s, name, projs) {
+    ensureScraps(s);
+    let changed = false;
+    for (const p of projs || ['plan', 'elev']) {
+      if (scrapStations(s, p, s.act[p]).has(name)) continue;
+      const id = stationScrap(s, p, name);
+      if (id && id !== s.act[p]) { s.act[p] = id; changed = true; }
+    }
+    return changed;
+  }
+  function scrapNames(s, proj, base) {
+    const list = s.scraps[proj];
+    return list.map(sc => ({ sc, name: list.length > 1 ? base + sc.name : base }));
+  }
+
+  // ---------- viac riadkov → jeden ťah ----------
+  function shotsSpread(list) {
+    let dd = 0, da = 0;
+    for (let a = 0; a < list.length; a++) for (let b = a + 1; b < list.length; b++) {
+      dd = Math.max(dd, Math.abs(list[a].d - list[b].d)); da = Math.max(da, angleBetween(list[a], list[b]));
+    }
+    return { dd, da };
+  }
+  function mergeMeasurements(sel) {
+    const meas = [];
+    for (const x of sel) { if (x.raw && x.raw.length) for (const r of x.raw) meas.push({ d: r[0], a: r[1], i: r[2] }); else meas.push({ d: x.d, a: x.a, i: x.i }); }
+    return meas;
+  }
+  function checkMerge(s, ids) {
+    const set = new Set(ids), sel = s.shots.filter(x => set.has(x.id));
+    if (sel.length < 2) throw new Error('Označ aspoň 2 riadky');
+    if (sel.some(x => x.from !== sel[0].from)) throw new Error('Označené riadky musia mať rovnaké Od');
+    if (sel.filter(x => x.to).length > 1) throw new Error('Medzi označenými môže byť najviac jeden ťah');
+    return { sel, meas: mergeMeasurements(sel) };
+  }
+  function mergeShots(s, ids, opt) {
+    opt = opt || {};
+    const { sel, meas } = checkMerge(s, ids);
+    const from = sel[0].from, leg0 = sel.find(x => x.to), av = averageShots(meas);
+    const to = leg0 ? leg0.to : (from === s.cur ? s.next : suggestNext(s, from));
+    const ext = leg0 ? leg0.ext : autoExt(av.a, s.ext, opt.autoExt);
+    const last = sel[sel.length - 1];
+    const leg = { id: uid(), from, to, d: av.d, a: av.a, i: av.i, ext, t: last.t, c: sel.map(x => x.c).filter(Boolean).join('; '),
+      raw: meas.map(m => [m.d, m.a, m.i]), sp: sel[0].sp, se: sel[0].se };
+    const set = new Set(ids);
+    s.shots = s.shots.flatMap(x => x === last ? [leg] : set.has(x.id) ? [] : [x]);
+    if (!leg0 && from === s.cur) { s.ext = ext; setCurrent(s, to); } else s.next = suggestNext(s, s.cur);
+    s.modified = Date.now();
+    return leg;
   }
 
   function stats(s) {
@@ -530,7 +659,7 @@ details summary{cursor:pointer;color:var(--muted);margin:10px 0 6px}
     for (const st of starts) {
       if (!st || pos.has(st)) continue;
       if (!adj.has(st) && !splays.some(S => S.from === st) && st !== s.start) continue;
-      pos.set(st, { x: 0, y: 0, z: 0, ex: 0, comp });
+      pos.set(st, { x: 0, y: 0, z: 0, ex: 0, comp, depth: 0 });
       const q = [st];
       while (q.length) {
         const n = q.shift(), P = pos.get(n);
@@ -538,7 +667,7 @@ details summary{cursor:pointer;color:var(--muted);margin:10px 0 6px}
           const o = fwd ? L.to : L.from;
           if (pos.has(o)) continue;
           const v = vec(L), sg = fwd ? 1 : -1, e = L.ext >= 0 ? 1 : -1;
-          pos.set(o, { x: P.x + sg * v.dx, y: P.y + sg * v.dy, z: P.z + sg * v.dz, ex: P.ex + sg * e * v.h, comp, pn: n, via: L.id });
+          pos.set(o, { x: P.x + sg * v.dx, y: P.y + sg * v.dy, z: P.z + sg * v.dz, ex: P.ex + sg * e * v.h, comp, pn: n, via: L.id, depth: P.depth + 1 });
           q.push(o);
         }
       }
@@ -567,7 +696,7 @@ details summary{cursor:pointer;color:var(--muted);margin:10px 0 6px}
   const projXY = (P, proj) => (proj === 'plan' ? [P.x, P.y] : [P.ex, P.z]);
 
   // Ťahy náčrtu sú ukotvené k najbližšej stanici – pri oprave dát sa posúvajú so stanicou.
-  function makeStroke(abs, col, geo, proj, width) {
+  function makeStroke(abs, col, geo, proj, width, sc) {
     let bx = 0, by = 0; const n = abs.length / 2;
     for (let k = 0; k < abs.length; k += 2) { bx += abs[k]; by += abs[k + 1]; }
     bx /= n; by /= n;
@@ -578,6 +707,7 @@ details summary{cursor:pointer;color:var(--muted);margin:10px 0 6px}
     }
     const pts = abs.map((v, k) => +(v - o[k & 1]).toFixed(3));
     const st = { id: uid(), col, anc, o: [+o[0].toFixed(3), +o[1].toFixed(3)], pts };
+    if (sc) st.sc = sc;
     if (width) st.w = width;
     return st;
   }
@@ -693,13 +823,38 @@ details summary{cursor:pointer;color:var(--muted);margin:10px 0 6px}
     }
     // mierka v hlavičke: Therion ju pri scrape so stanicami nepotrebuje, PreTherion z nej berie mierku kresby
     const sc = ' -scale [0 0 ' + fmt(SCRAP_SCALE_M * k, 3) + ' 0 0 0 ' + SCRAP_SCALE_M + ' 0 m]';
-    L.push('', '', 'scrap ' + scrapName + ' -projection ' + (proj === 'plan' ? 'plan' : 'extended') + sc);
-    for (const [n, P] of geo.pos) {
-      const q = projXY(P, proj);
-      L.push('  point ' + fmt(q[0] * k - g.x0, 2) + ' ' + fmt(q[1] * k - g.y0, 2) + ' station -name ' + n);
+    ensureScraps(s);
+    for (const { sc: scr, name } of scrapNames(s, proj, scrapName)) {
+      const sts = scrapStations(s, proj, scr.id);
+      L.push('', '', 'scrap ' + name + ' -projection ' + (proj === 'plan' ? 'plan' : 'extended') + sc);
+      for (const [n, P] of geo.pos) {
+        if (!sts.has(n)) continue;
+        const q = projXY(P, proj);
+        L.push('  point ' + fmt(q[0] * k - g.x0, 2) + ' ' + fmt(q[1] * k - g.y0, 2) + ' station -name ' + n);
+      }
+      L.push('endscrap');
     }
-    L.push('endscrap', '');
+    L.push('');
     return L.join('\n');
+  }
+
+  // hlavný súbor: survey s centreline, scrapmi a mapami; scrapy zhora nadol oddelené break
+  function toMain(s, b) {
+    ensureScraps(s);
+    const L = ['encoding  utf-8', '# ' + s.name + ' – hlavný súbor (WebTopo)', 'survey ' + b + ' -title "' + String(s.name).replace(/"/g, '') + '"',
+      '  input ' + b + '.th', '  input ' + b + '_p.th2', '  input ' + b + '_e.th2', ''];
+    for (const [proj, key, pj] of [['plan', 'p', 'plan'], ['elev', 'e', 'extended']]) {
+      L.push('  map ' + b + '_m' + key + ' -projection ' + pj);
+      scrapNames(s, proj, b + '_' + key).forEach((x, i) => { if (i) L.push('    break'); L.push('    ' + x.name); });
+      L.push('  endmap', '');
+    }
+    L.push('endsurvey');
+    return L.join('\n') + '\n';
+  }
+  function toThconfig(s, b) {
+    return ['encoding  utf-8', 'source ' + b + '_hlavny.th', '',
+      'select ' + b + '_mp@' + b, 'select ' + b + '_me@' + b, '',
+      'export map -projection plan -o ' + b + '_podorys.pdf', 'export map -projection extended -o ' + b + '_rez.pdf', 'export model -o ' + b + '.lox', ''].join('\n');
   }
 
   function safeName(n) {
@@ -713,6 +868,8 @@ details summary{cursor:pointer;color:var(--muted);margin:10px 0 6px}
       { name: b + '_e.xvi', text: toXVI(s, 'elev') },
       { name: b + '_p.th2', text: toTh2(s, 'plan', b + '_p.xvi', b + '_p') },
       { name: b + '_e.th2', text: toTh2(s, 'elev', b + '_e.xvi', b + '_e') },
+      { name: b + '_hlavny.th', text: toMain(s, b) },
+      { name: b + '.thconfig', text: toThconfig(s, b) },
       { name: b + '_pockettopo.txt', text: toPocketTopo(s) },
       { name: b + '.webtopo.json', text: JSON.stringify(s) }
     ];
@@ -823,9 +980,10 @@ details summary{cursor:pointer;color:var(--muted);margin:10px 0 6px}
     norm360, uid, isoDate, fmt, fmtAz, hex,
     distoxAck, decodeDistoX, DistoXStream, distoxBleFrame, decodeDistoXBle, decodeSap6, decodeBricPrimary, decodeBricMeta, decodeBricErr,
     newSurvey, normalizeSurvey, stationNames, suggestNext, setCurrent, angleBetween, shotsClose, averageShots,
-    addMeasurement, detectLeg, deleteShot, reverseShot, toggleExt, setLegExt, splitLeg, makeLeg, renameStation, stats, incoming, setExtend,
+    addMeasurement, detectLeg, deleteShot, reverseShot, toggleExt, setLegExt, splitLeg, makeLeg, renameStation, stats, incoming, setExtend, legSign, screenExt, setScreenExt, autoExt,
+    ensureScraps, shotScrap, strokeScrap, scrapStations, addScrap, stationScrap, activateFor, scrapNames, shotsSpread, checkMerge, mergeMeasurements, mergeShots,
     compute, projXY, makeStroke, strokeAbs,
-    toTherion, toPocketTopo, toXVI, toTh2, therionBundle, safeName, fromPocketTopo, fromJSON, crc32, zip, Simulator
+    toTherion, toPocketTopo, toXVI, toTh2, toMain, toThconfig, therionBundle, safeName, fromPocketTopo, fromJSON, crc32, zip, Simulator
   };
 });
 
@@ -835,7 +993,7 @@ details summary{cursor:pointer;color:var(--muted);margin:10px 0 6px}
 (() => {
   'use strict';
   const WT = window.WT, U = WT.UUID;
-  const APP_VERSION = '1.6';
+  const APP_VERSION = '1.7';
   const $ = s => document.querySelector(s);
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const num = v => parseFloat(String(v).trim().replace(',', '.'));
@@ -859,7 +1017,7 @@ details summary{cursor:pointer;color:var(--muted);margin:10px 0 6px}
   const PEN_SK = { black: 'čierna', gray: 'sivá', brown: 'hnedá', blue: 'modrá', red: 'červená', green: 'zelená', orange: 'oranžová' };
 
   // ---------------- nastavenia ----------------
-  const DEF = { tolD: 0.05, tolA: 1.7, legShots: 3, branch: 'series', sound: true, vib: true, autoRe: true, wakeDev: true,
+  const DEF = { tolD: 0.05, tolA: 1.7, legShots: 3, branch: 'series', sound: true, vib: true, autoRe: true, wakeDev: true, autoExt: 'azimuth',
     sketchSplays: true, hideSplays: false, font: 'm', pen: 2, devType: 'distox2', wake: false, labels: true };
   let S = Object.assign({}, DEF);
   try { Object.assign(S, JSON.parse(localStorage.getItem('wt.settings') || '{}')); } catch (e) { /* prázdne */ }
@@ -903,7 +1061,7 @@ details summary{cursor:pointer;color:var(--muted);margin:10px 0 6px}
     if (!sv) return;
     const anc = [];
     for (const p of ['plan', 'elev']) for (const st of sv.sketch[p]) anc.push([st.id, st.anc]);
-    undoData.push(JSON.stringify({ shots: sv.shots, cur: sv.cur, next: sv.next, ext: sv.ext, start: sv.start, fix: sv.fix, anc }));
+    undoData.push(JSON.stringify({ shots: sv.shots, cur: sv.cur, next: sv.next, ext: sv.ext, start: sv.start, fix: sv.fix, scraps: sv.scraps, act: sv.act, anc }));
     if (undoData.length > 60) undoData.shift();
     syncUndo();
   }
@@ -913,6 +1071,8 @@ details summary{cursor:pointer;color:var(--muted);margin:10px 0 6px}
     if (!j) { toast('Nie je čo vrátiť'); return; }
     const o = JSON.parse(j);
     Object.assign(sv, { shots: o.shots, cur: o.cur, next: o.next, ext: o.ext, start: o.start, fix: o.fix });
+    if (o.scraps) { sv.scraps = o.scraps; sv.act = o.act; }
+    if (multi) { multi = null; syncMulti(); }
     const m = new Map(o.anc);
     for (const p of ['plan', 'elev']) for (const st of sv.sketch[p]) if (m.has(st.id)) st.anc = m.get(st.id);
     if (sel && sel.t === 'sh' && !sv.shots.some(x => x.id === sel.id)) sel = null;
@@ -1311,7 +1471,7 @@ details summary{cursor:pointer;color:var(--muted);margin:10px 0 6px}
   function onMeasurement(m) {
     if (!sv) return;
     snap();
-    const r = WT.addMeasurement(sv, m, { tolD: S.tolD, tolA: S.tolA, legShots: S.legShots });
+    const r = WT.addMeasurement(sv, m, { tolD: S.tolD, tolA: S.tolA, legShots: S.legShots, autoExt: S.autoExt });
     flashId = r.shot.id;
     if (r.kind === 'leg') {
       beep([880, 1320]); vib([70, 60, 70]);
@@ -1359,11 +1519,11 @@ details summary{cursor:pointer;color:var(--muted);margin:10px 0 6px}
   }
   function rowHTML(sh) {
     const leg = !!sh.to;
-    const cls = (leg ? 'leg' : 'splay') + (sh.id === flashId ? ' new' : '') + ((sh.to || sh.from) === sv.cur && leg ? ' cur' : '') + (rowSel(sh) ? ' sel' : '');
+    const cls = (leg ? 'leg' : 'splay') + (sh.id === flashId ? ' new' : '') + ((sh.to || sh.from) === sv.cur && leg ? ' cur' : '') + (rowSel(sh) ? ' sel' : '') + (multi && multi.has(sh.id) ? ' msel' : '');
     return '<tr class="' + cls + '" data-id="' + sh.id + '"><td class="mn">' + ICON.chev + '</td><td class="st" data-f="from">' + esc(sh.from) +
       '</td><td class="st" data-f="to">' + (leg ? esc(sh.to) : '–') + (sh.c ? '<span class="cm">✎</span>' : '') +
       '</td><td data-f="d">' + WT.fmt(sh.d, 2) + '</td><td data-f="a">' + WT.fmt(+WT.fmtAz(sh.a), 1) + '</td><td data-f="i">' + WT.fmt(sh.i, 1) +
-      '</td><td class="ex" data-f="ext">' + (leg ? (sh.ext >= 0 ? '›' : '‹') : '') + '</td></tr>';
+      '</td><td class="ex" data-f="ext">' + (leg ? (WT.screenExt(geo, sh) >= 0 ? '›' : '‹') : '') + '</td></tr>';
   }
   function renderTable() {
     if (editing) { tablePending = true; return; }
@@ -1397,7 +1557,7 @@ details summary{cursor:pointer;color:var(--muted);margin:10px 0 6px}
     const tr = td.closest('tr'), f = td.dataset.f;
     const sh = tr && sv.shots.find(x => x.id === tr.dataset.id);
     if (!sh || !f) return;
-    if (f === 'ext') { if (sh.to) { snap(); WT.setLegExt(sv, sh.id, sh.ext >= 0 ? -1 : 1); changed(); } return; }
+    if (f === 'ext') { if (sh.to) { snap(); WT.setScreenExt(sv, sh.id, -WT.screenExt(geo, sh)); changed(); } return; }
     const val = f === 'from' ? sh.from : f === 'to' ? sh.to : f === 'd' ? WT.fmt(sh.d, 3) : f === 'a' ? WT.fmtAz(sh.a) : WT.fmt(sh.i, 2);
     const inp = document.createElement('input');
     inp.className = 'cell'; inp.value = val; inp.autocomplete = 'off';
@@ -1450,7 +1610,8 @@ details summary{cursor:pointer;color:var(--muted);margin:10px 0 6px}
       if (!(d >= 0) || !(a >= 0 && a <= 360) || !(i >= -90 && i <= 90)) throw new Error('Skontroluj hodnoty: dĺžka ≥ 0, azimut 0–360°, sklon −90 až 90°');
     } catch (err) { toast(err.message, 'bad'); return false; }
     snap();
-    const shot = { id: WT.uid(), from: sv.cur, to, d, a: WT.norm360(a), i, ext: sv.ext, t: Date.now(), c: '', manual: true };
+    if (to) sv.ext = WT.autoExt(a, sv.ext, S.autoExt);
+    const shot = { id: WT.uid(), from: sv.cur, to, d, a: WT.norm360(a), i, ext: sv.ext, t: Date.now(), c: '', manual: true, sp: sv.act.plan, se: sv.act.elev };
     sv.shots.push(shot);
     if (to) WT.setCurrent(sv, to); else sv.next = WT.suggestNext(sv, sv.cur);
     flashId = shot.id;
@@ -1470,6 +1631,7 @@ details summary{cursor:pointer;color:var(--muted);margin:10px 0 6px}
       canvas.addEventListener('pointermove', e => this.move(e));
       canvas.addEventListener('pointerup', e => this.up(e));
       canvas.addEventListener('pointercancel', e => this.up(e, true));
+      canvas.addEventListener('contextmenu', e => e.preventDefault());
       canvas.addEventListener('wheel', e => { e.preventDefault(); this.zoomAt(e.offsetX, e.offsetY, Math.exp(-e.deltaY * 0.0015)); }, { passive: false });
       new ResizeObserver(() => this.resize()).observe(canvas.parentElement);
     }
@@ -1549,25 +1711,29 @@ details summary{cursor:pointer;color:var(--muted);margin:10px 0 6px}
       }
       if (!geo) return;
       const key = this.proj === 'plan' ? 'p' : 'e';
-      // zámery
-      if (S.sketchSplays) {
-        c.strokeStyle = '#9fb0bc'; c.lineWidth = 1; c.beginPath();
-        for (const sg of geo.segs) if (sg.kind === 'splay') { const q = sg[key]; c.moveTo(this.sx(q[0]), this.sy(q[1])); c.lineTo(this.sx(q[2]), this.sy(q[3])); }
+      // scrapy: čo nepatrí do aktívneho scrapu, sa výrazne zošedne
+      const sc = this.scrapInfo();
+      const segOn = sg => !sc.many || sc.shots.has(sg.id);
+      c.lineCap = 'round'; c.lineJoin = 'round';
+      for (const active of [false, true]) {
+        if (!active && !sc.many) continue;
+        c.globalAlpha = active ? 1 : 0.16;
+        if (S.sketchSplays) {   // zámery
+          c.strokeStyle = '#9fb0bc'; c.lineWidth = 1; c.beginPath();
+          for (const sg of geo.segs) if (sg.kind === 'splay' && segOn(sg) === active) { const q = sg[key]; c.moveTo(this.sx(q[0]), this.sy(q[1])); c.lineTo(this.sx(q[2]), this.sy(q[3])); }
+          c.stroke();
+        }
+        for (const st of sv.sketch[this.proj]) if ((!sc.many || WT.strokeScrap(sv, st, this.proj) === sc.id) === active) this.drawStroke(WT.strokeAbs(st, geo, this.proj), st.col, st.w);
+        if (active && sel && sel.t === 'sh') {   // vybraný riadok tabuľky (podklad)
+          const sg = geo.segs.find(x => x.id === sel.id);
+          if (sg) { const q = sg[key]; c.strokeStyle = 'rgba(2,136,209,.28)'; c.lineWidth = 9; c.beginPath(); c.moveTo(this.sx(q[0]), this.sy(q[1])); c.lineTo(this.sx(q[2]), this.sy(q[3])); c.stroke(); }
+        }
+        c.strokeStyle = '#b3261e'; c.lineWidth = 2.2; c.beginPath();   // ťahy
+        for (const sg of geo.segs) if (sg.kind === 'leg' && segOn(sg) === active) { const q = sg[key]; c.moveTo(this.sx(q[0]), this.sy(q[1])); c.lineTo(this.sx(q[2]), this.sy(q[3])); }
         c.stroke();
       }
-      // náčrt
-      c.lineCap = 'round'; c.lineJoin = 'round';
-      for (const st of sv.sketch[this.proj]) this.drawStroke(WT.strokeAbs(st, geo, this.proj), st.col, st.w);
+      c.globalAlpha = 1;
       if (this.stroke) this.drawStroke(this.stroke.pts, this.col, S.pen);
-      // vybraný riadok tabuľky
-      if (sel && sel.t === 'sh') {
-        const sg = geo.segs.find(x => x.id === sel.id);
-        if (sg) { const q = sg[key]; c.strokeStyle = 'rgba(2,136,209,.28)'; c.lineWidth = 9; c.beginPath(); c.moveTo(this.sx(q[0]), this.sy(q[1])); c.lineTo(this.sx(q[2]), this.sy(q[3])); c.stroke(); }
-      }
-      // ťahy
-      c.strokeStyle = '#b3261e'; c.lineWidth = 2.2; c.beginPath();
-      for (const sg of geo.segs) if (sg.kind === 'leg') { const q = sg[key]; c.moveTo(this.sx(q[0]), this.sy(q[1])); c.lineTo(this.sx(q[2]), this.sy(q[3])); }
-      c.stroke();
       // vybraný riadok tabuľky farebne nad ťahmi
       if (sel && sel.t === 'sh') {
         const sg = geo.segs.find(x => x.id === sel.id);
@@ -1580,6 +1746,7 @@ details summary{cursor:pointer;color:var(--muted);margin:10px 0 6px}
         const q = this.xy(P), X = this.sx(q[0]), Y = this.sy(q[1]);
         if (X < -40 || Y < -40 || X > W + 40 || Y > H + 40) continue;
         const isCur = name === sv.cur;
+        c.globalAlpha = sc.many && !sc.st.has(name) ? 0.2 : 1;
         if (sel && sel.t === 'st' && sel.name === name) {
           c.fillStyle = 'rgba(2,136,209,.16)'; c.strokeStyle = 'rgba(2,136,209,.55)'; c.lineWidth = 1.5;
           c.beginPath(); c.arc(X, Y, 14, 0, Math.PI * 2); c.fill(); c.stroke();
@@ -1591,6 +1758,12 @@ details summary{cursor:pointer;color:var(--muted);margin:10px 0 6px}
           c.lineWidth = 3; c.strokeStyle = 'rgba(251,250,245,.9)'; c.strokeText(name, X + 7, Y - 9);
           c.fillStyle = isCur ? '#01579b' : '#5d4037'; c.fillText(name, X + 7, Y - 9);
         }
+      }
+      c.globalAlpha = 1;
+      if (sc.many) {
+        const list = sv.scraps[this.proj], k = list.findIndex(x => x.id === sc.id);
+        c.font = '600 11px system-ui, sans-serif'; c.fillStyle = '#455a64';
+        c.fillText('scrap ' + list[k].name + ' · ' + (k + 1) + '. zhora z ' + list.length, 12, 18);
       }
       if (!geo.pos.size) {
         c.fillStyle = '#7b8a97'; c.font = '14px system-ui, sans-serif'; c.textAlign = 'center';
@@ -1607,6 +1780,11 @@ details summary{cursor:pointer;color:var(--muted);margin:10px 0 6px}
       } else {
         c.fillStyle = '#607d8b'; c.font = '11px system-ui, sans-serif'; c.fillText('rozvinutý rez', W - 88, 18);
       }
+    }
+    scrapInfo() {
+      const list = sv.scraps[this.proj], id = sv.act[this.proj];
+      if (list.length < 2) return { many: false, id };
+      return { many: true, id, shots: new Set(sv.shots.filter(x => WT.shotScrap(sv, x, this.proj) === id).map(x => x.id)), st: WT.scrapStations(sv, this.proj, id) };
     }
     drawStroke(a, col, w) {
       const c = this.ctx;
@@ -1626,10 +1804,13 @@ details summary{cursor:pointer;color:var(--muted);margin:10px 0 6px}
       if (this.ptrs.size === 1) {
         this.tap = { x: p.x, y: p.y, t: performance.now(), moved: false };
         this.blocked = false;
+        clearTimeout(this.lpT);
+        if (this.tool !== 'erase') this.lpT = setTimeout(() => this.longPress(), 550);
         if (this.tool === 'pen') this.stroke = { pts: this.toModel(p.x, p.y), last: p, t: performance.now(), len: 0 };
         else if (this.tool === 'erase') { this.eraseSnap = sv.sketch[this.proj].slice(); this.eraseAt(p); }
         this.panLast = p;
       } else if (this.ptrs.size === 2) {
+        clearTimeout(this.lpT);
         if (this.stroke) { if (this.stroke.len > 60 && performance.now() - this.stroke.t > 400) this.commitStroke(); this.stroke = null; }
         const [a, b] = [...this.ptrs.values()];
         this.pinch = { d: Math.hypot(a.x - b.x, a.y - b.y) || 1, m: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 } };
@@ -1641,7 +1822,7 @@ details summary{cursor:pointer;color:var(--muted);margin:10px 0 6px}
       if (!this.ptrs.has(e.pointerId)) return;
       const p = this.pt(e), prev = this.ptrs.get(e.pointerId);
       this.ptrs.set(e.pointerId, p);
-      if (this.tap && Math.hypot(p.x - this.tap.x, p.y - this.tap.y) > 8) this.tap.moved = true;
+      if (this.tap && Math.hypot(p.x - this.tap.x, p.y - this.tap.y) > 8) { this.tap.moved = true; clearTimeout(this.lpT); }
       if (this.ptrs.size >= 2 && this.pinch) {
         const [a, b] = [...this.ptrs.values()];
         const d = Math.hypot(a.x - b.x, a.y - b.y) || 1, m = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
@@ -1669,9 +1850,14 @@ details summary{cursor:pointer;color:var(--muted);margin:10px 0 6px}
       this.ptrs.delete(e.pointerId);
       if (this.ptrs.size < 2) this.pinch = null;
       if (this.ptrs.size) return;
+      clearTimeout(this.lpT);
       const tap = !cancel && this.tap && !this.tap.moved && !this.blocked && performance.now() - this.tap.t < 350;
-      const hit = tap && this.tool !== 'erase' ? this.stationAt(this.tap) : null;
-      if (hit) this.stroke = null;
+      let hit = tap && this.tool !== 'erase' ? this.stationAt(this.tap) : null, faded = false;
+      if (hit) {
+        this.stroke = null;
+        const sc = this.scrapInfo();
+        if (sc.many && !sc.st.has(hit)) { toast('Bod ' + hit + ' je v inom scrape – podrž ho dlhšie a scrap sa prepne'); hit = null; faded = true; }
+      }
       else if (this.stroke && !cancel && !this.blocked) this.commitStroke();
       this.stroke = null;
       if (this.tool === 'erase' && this.eraseSnap) {
@@ -1680,14 +1866,25 @@ details summary{cursor:pointer;color:var(--muted);margin:10px 0 6px}
       }
       this.tap = null; this.blocked = false;
       this.requestRender();
-      if (hit) { select({ t: 'st', name: hit }); stationMenu(hit); }
-      else if (tap && sel) select(null);
+      if (hit) { select({ t: 'st', name: hit }); stationMenu(hit, null, this.proj); }
+      else if (tap && sel && !faded) select(null);
+    }
+    // dlhé podržanie na bode: prepne na jeho scrap a otvorí menu bodu
+    longPress() {
+      if (!this.tap || this.tap.moved || this.ptrs.size !== 1 || this.blocked) return;
+      const hit = this.stationAt(this.tap); if (!hit) return;
+      this.stroke = null; this.blocked = true; vib(30);
+      const sw = WT.activateFor(sv, hit, [this.proj]);
+      sel = { t: 'st', name: hit };
+      if (sw) { changed(); const a = sv.scraps[this.proj].find(x => x.id === sv.act[this.proj]); toast('Aktívny scrap ' + a.name); }
+      else { applySel(); this.requestRender(); }
+      stationMenu(hit, null, this.proj);
     }
     commitStroke() {
       const st = this.stroke; if (!st || st.pts.length < 2) return;
       if (st.pts.length === 2 && performance.now() - st.t < 120) return; // náhodný dotyk
       this.pushUndo(sv.sketch[this.proj].slice());
-      sv.sketch[this.proj].push(WT.makeStroke(st.pts.map(v => +v.toFixed(3)), this.col, geo, this.proj, S.pen !== 2 ? S.pen : undefined));
+      sv.sketch[this.proj].push(WT.makeStroke(st.pts.map(v => +v.toFixed(3)), this.col, geo, this.proj, S.pen !== 2 ? S.pen : undefined, sv.act[this.proj]));
       this.stroke = null;
       changed();
     }
@@ -1729,15 +1926,23 @@ details summary{cursor:pointer;color:var(--muted);margin:10px 0 6px}
     else toast('Odtiaľ ' + n + (n === 1 ? ' ťah rozvinutý ' : n < 5 ? ' ťahy rozvinuté ' : ' ťahov rozvinutých ') + w);
   };
   // Menu bodu: ťuknutie na bod v náčrte alebo šípka pri riadku ťahu (rowLeg = ťah z riadku).
-  function stationMenu(name, rowLeg) {
-    const inc = WT.incoming(sv, name, geo);
-    const leg = rowLeg || (inc && inc.leg);
-    const from = rowLeg ? rowLeg.from : inc && inc.from;
-    const ext = leg ? (leg.ext >= 0 ? 1 : -1) : 0;
-    let body = '<div class="mgrid r3">' +
+  // Menu bodu: ťuknutie na bod v náčrte (proj = pôdorys/rez) alebo šípka pri riadku ťahu (rowLeg).
+  // Rozvinutie ‹ › sa riadi smerom polygónu na obrazovke (od predošlého bodu k tomuto), nie zápisom riadku.
+  function stationMenu(name, rowLeg, proj) {
+    let leg, from;
+    if (rowLeg) {
+      leg = rowLeg;
+      if (WT.legSign(geo, rowLeg) < 0) { name = rowLeg.from; from = rowLeg.to; } else { name = rowLeg.to; from = rowLeg.from; }
+    } else {
+      const inc = WT.incoming(sv, name, geo);
+      leg = inc && inc.leg; from = inc && inc.from;
+    }
+    const ext = leg ? WT.screenExt(geo, leg) : 0;
+    let body = '<div class="mgrid ' + (proj ? 'r4' : 'r3') + '">' +
       mbtn('rev', 'Otočiť ťah', leg ? leg.from + ' – ' + leg.to : 'bez ťahu', { dis: !leg }) +
       mbtn('cont', 'Pokračovať', 'z ' + name, { on: sv.cur === name }) +
-      mbtn('ren', 'Premenovať', name) + '</div>' +
+      mbtn('ren', 'Premenovať', name) +
+      (proj ? mbtn('scrap', '+ Scrap', 'od ' + name) : '') + '</div>' +
       '<div class="mgrid r4">' +
       mbtn('l1', '‹ Rozvinúť', 'vľavo', { dis: !leg, on: ext < 0 }) +
       mbtn('r1', 'Rozvinúť ›', 'vpravo', { dis: !leg, on: ext > 0 }) +
@@ -1745,9 +1950,10 @@ details summary{cursor:pointer;color:var(--muted);margin:10px 0 6px}
       mbtn('ra', 'Všetko ›', 'odtiaľ vpravo') + '</div>';
     if (rowLeg) {
       const nr = rowLeg.raw ? rowLeg.raw.length : 0;
-      body += '<div class="mgrid r3">' +
+      body += '<div class="mgrid r4">' +
         mbtn('edit', 'Upraviť', rowLeg.c ? '✎ poznámka' : 'aj poznámku') +
         mbtn('split', 'Rozdeliť', nr > 1 ? 'na ' + nr + ' zámery' : 'jedno meranie', { dis: nr < 2 }) +
+        mbtn('multi', 'Označiť', 'viac riadkov') +
         mbtn('del', 'Vymazať', 'riadok', { bad: true }) + '</div>';
     }
     const m = modal('Bod ' + name, body, [], { sub: from ? 'z bodu ' + from : (name === sv.start ? 'počiatočný bod' : '') });
@@ -1757,28 +1963,54 @@ details summary{cursor:pointer;color:var(--muted);margin:10px 0 6px}
       const a = b.dataset.a;
       close(m);
       if (a === 'rev') { snap(); WT.reverseShot(sv, leg.id); changed(); toast('Ťah teraz ' + leg.from + ' → ' + leg.to); }
-      else if (a === 'cont') { snap(); WT.setCurrent(sv, name); changed(); toast('Pokračuješ z ' + name); }
+      else if (a === 'cont') continueFrom(name);
       else if (a === 'ren') renameDialog(name);
+      else if (a === 'scrap') scrapDialog(name, proj);
       else if (a === 'edit') editDialog(rowLeg);
       else if (a === 'split') { snap(); WT.splitLeg(sv, rowLeg.id); changed(); }
+      else if (a === 'multi') enterMulti(rowLeg.id);
       else if (a === 'del') { if (await confirmBox('Vymazať riadok ' + rowLeg.from + ' → ' + rowLeg.to + '?', 'Vymazať')) { snap(); WT.deleteShot(sv, rowLeg.id); changed(); } }
       else {
         const dir = a[0] === 'r' ? 1 : -1, all = a[1] === 'a';
         snap();
         let n = 1;
         if (all) n = WT.setExtend(sv, name, dir, true);
-        if (leg && (!all || rowLeg)) WT.setLegExt(sv, leg.id, dir);
+        if (leg && (!all || rowLeg)) WT.setScreenExt(sv, leg.id, dir);
         changed();
         extToast(dir, all, n, leg);
       }
     });
   }
+  function continueFrom(name) {
+    snap(); WT.setCurrent(sv, name);
+    const sw = WT.activateFor(sv, name);
+    changed();
+    toast('Pokračuješ z ' + name + (sw ? ' (iný scrap)' : ''));
+  }
+  // nový scrap od bodu: nad alebo pod aktívnym scrapom; merania potom pokračujú z tohto bodu
+  function scrapDialog(name, proj) {
+    const act = sv.scraps[proj].find(x => x.id === sv.act[proj]);
+    const make = where => {
+      snap();
+      const sc = WT.addScrap(sv, proj, name, where);
+      if (sv.cur !== name) WT.setCurrent(sv, name);
+      changed();
+      toast('Scrap ' + sc.name + ' ' + (where === 'above' ? 'nad' : 'pod') + ' scrapom ' + act.name + ' · od bodu ' + name, 'ok');
+    };
+    modal('Nový scrap od bodu ' + name, '<p class="muted">' + (proj === 'plan' ? 'Pôdorys' : 'Rozvinutý rez') + ': nový scrap bude nad alebo pod scrapom ' + esc(act.name) +
+      '. Doterajšie body a kresba sa zošednú, merania pokračujú z bodu ' + esc(name) + '. Export ich zoradí v mape cez break.</p>', [
+      { label: 'Zrušiť' },
+      { label: 'Pod', onClick: () => make('below') },
+      { label: 'Nad', cls: 'pri', onClick: () => make('above') }
+    ]);
+  }
   function splayMenu(sh) {
     const to = sh.from === sv.cur ? sv.next : WT.suggestNext(sv, sh.from);
-    const body = '<div class="mgrid r4">' +
+    const body = '<div class="mgrid r3">' +
       mbtn('leg', 'Na ťah', sh.from + ' → ' + to) +
       mbtn('cont', 'Pokračovať', 'z ' + sh.from, { on: sv.cur === sh.from }) +
-      mbtn('edit', 'Upraviť', sh.c ? '✎ poznámka' : 'aj poznámku') +
+      mbtn('edit', 'Upraviť', sh.c ? '✎ poznámka' : 'aj poznámku') + '</div><div class="mgrid r3">' +
+      mbtn('multi', 'Označiť', 'viac riadkov') +
       mbtn('del', 'Vymazať', 'riadok', { bad: true }) + '</div>';
     const m = modal('Zámer z ' + sh.from, body, [], { sub: WT.fmt(sh.d, 2) + ' m · ' + WT.fmt(+WT.fmtAz(sh.a), 1) + '° · ' + WT.fmt(sh.i, 1) + '°' });
     m.el.classList.add('compact');
@@ -1786,11 +2018,47 @@ details summary{cursor:pointer;color:var(--muted);margin:10px 0 6px}
       const b = e.target.closest('button[data-a]'); if (!b || b.disabled) return;
       const a = b.dataset.a;
       close(m);
-      if (a === 'leg') { snap(); WT.makeLeg(sv, sh.id, to); changed(); toast('Ťah ' + sh.from + ' → ' + to); }
-      else if (a === 'cont') { snap(); WT.setCurrent(sv, sh.from); changed(); toast('Pokračuješ z ' + sh.from); }
+      if (a === 'leg') { snap(); WT.makeLeg(sv, sh.id, to, S.autoExt); changed(); toast('Ťah ' + sh.from + ' → ' + to); }
+      else if (a === 'cont') continueFrom(sh.from);
       else if (a === 'edit') editDialog(sh);
+      else if (a === 'multi') enterMulti(sh.id);
       else if (a === 'del') { if (await confirmBox('Vymazať zámer z ' + sh.from + '?', 'Vymazať')) { snap(); WT.deleteShot(sv, sh.id); changed(); } }
     });
+  }
+
+  // ---------------- označenie viacerých riadkov ----------------
+  let multi = null;
+  function enterMulti(id) { multi = new Set([id]); sel = null; renderTable(); syncMulti(); }
+  function exitMulti() { if (!multi) return; multi = null; renderTable(); syncMulti(); }
+  function syncMulti() {
+    const bar = $('#mbar'); bar.hidden = !multi;
+    $('#tblWrap').classList.toggle('mpad', !!multi);
+    if (multi) $('#mCount').textContent = multi.size + ' ' + (multi.size === 1 ? 'riadok' : multi.size < 5 ? 'riadky' : 'riadkov');
+    document.querySelectorAll('#tbody tr[data-id]').forEach(tr => tr.classList.toggle('msel', !!multi && multi.has(tr.dataset.id)));
+  }
+  async function multiLeg() {
+    const ids = sv.shots.filter(x => multi.has(x.id)).map(x => x.id);
+    let meas;
+    try { meas = WT.checkMerge(sv, ids).meas; } catch (e) { toast(e.message, 'bad'); return; }
+    const sp = WT.shotsSpread(meas);
+    if (sp.dd > S.tolD || sp.da > S.tolA) {
+      const ok = await confirmBox('Merania sa líšia o ' + WT.fmt(sp.dd, 3) + ' m a ' + WT.fmt(sp.da, 1) + '° (tolerancia ' + S.tolD + ' m a ' + S.tolA + '°). Aj tak z nich spraviť ťah?', 'Spraviť ťah');
+      if (!ok) return;
+    }
+    snap();
+    const leg = WT.mergeShots(sv, ids, { autoExt: S.autoExt });
+    multi = null; syncMulti();
+    sel = { t: 'sh', id: leg.id }; flashId = leg.id;
+    changed(true);
+    toast('Ťah ' + leg.from + ' → ' + leg.to + ' z ' + meas.length + ' meraní', 'ok');
+  }
+  async function multiDel() {
+    const ids = [...multi];
+    if (!(await confirmBox('Vymazať ' + ids.length + (ids.length < 5 ? ' riadky' : ' riadkov') + '?', 'Vymazať'))) return;
+    snap();
+    for (const id of ids) WT.deleteShot(sv, id);
+    multi = null; syncMulti(); changed(true);
+    toast('Vymazané: ' + ids.length);
   }
   function renameDialog(name) {
     modal('Premenovať stanicu', '<label>Nový názov pre ' + esc(name) + '<input id="rnTo" autofocus autocapitalize="off" autocomplete="off" value="' + esc(name) + '"></label>', [
@@ -1820,7 +2088,7 @@ details summary{cursor:pointer;color:var(--muted);margin:10px 0 6px}
         if (!validName(cur) || !validName(nx)) throw new Error('Názov môže mať len písmená bez diakritiky, číslice, bodku, - a _');
         if (cur === nx) throw new Error('Od a Do musia byť rôzne');
         snap();
-        if (cur !== sv.cur) WT.setCurrent(sv, cur);
+        if (cur !== sv.cur) { WT.setCurrent(sv, cur); WT.activateFor(sv, cur); }
         sv.next = nx; sv.ext = +el.querySelector('#sdExt').value;
         changed();
       } }
@@ -2065,6 +2333,7 @@ details summary{cursor:pointer;color:var(--muted);margin:10px 0 6px}
     const body = '<div class="grid2"><label>Tolerancia dĺžky [m]<input id="sTolD" inputmode="decimal" value="' + S.tolD + '"></label>' +
       '<label>Tolerancia uhla [°]<input id="sTolA" inputmode="decimal" value="' + S.tolA + '"></label></div>' +
       '<label>Ťah = koľko zhodných meraní za sebou<select id="sLeg"><option value="3">3 (ako PocketTopo)</option><option value="2">2</option><option value="0">vypnuté (ťahy ručne)</option></select></label>' +
+      '<label>Automatické rozvinutie nového ťahu<select id="sAutoExt"><option value="azimuth">podľa azimutu: 15–165° doprava, 195–345° doľava (pri S a J ±15° ako predošlý)</option><option value="prev">ako predošlý ťah</option></select></label>' +
       '<label>Odbočka zo staršej stanice<select id="sBr"><option value="series">nová séria (1.3 → 2.1)</option><option value="continue">pokračovať číslovanie</option></select></label>' +
       '<label>Písmo tabuľky<select id="sFont"><option value="s">malé</option><option value="m">stredné</option><option value="l">veľké</option></select></label>' +
       '<label>Hrúbka pera<select id="sPen"><option value="1">tenké</option><option value="2">stredné</option><option value="3">hrubé</option></select></label>' +
@@ -2079,7 +2348,7 @@ details summary{cursor:pointer;color:var(--muted);margin:10px 0 6px}
       { label: 'Uložiť', cls: 'pri', onClick: el => {
         const tolD = num(el.querySelector('#sTolD').value), tolA = num(el.querySelector('#sTolA').value);
         if (!(tolD > 0 && tolD < 1) || !(tolA > 0 && tolA < 10)) throw new Error('Tolerancie: dĺžka 0–1 m, uhol 0–10°');
-        Object.assign(S, { tolD, tolA, legShots: +el.querySelector('#sLeg').value, branch: el.querySelector('#sBr').value,
+        Object.assign(S, { tolD, tolA, legShots: +el.querySelector('#sLeg').value, branch: el.querySelector('#sBr').value, autoExt: el.querySelector('#sAutoExt').value,
           font: el.querySelector('#sFont').value, pen: +el.querySelector('#sPen').value,
           wakeDev: el.querySelector('#sWakeDev').checked, sound: el.querySelector('#sSound').checked, vib: el.querySelector('#sVib').checked, sketchSplays: el.querySelector('#sSpl').checked,
           labels: el.querySelector('#sLbl').checked, hideSplays: el.querySelector('#sHide').checked });
@@ -2087,7 +2356,7 @@ details summary{cursor:pointer;color:var(--muted);margin:10px 0 6px}
       } }
     ]);
     const el = m.el;
-    el.querySelector('#sLeg').value = String(S.legShots); el.querySelector('#sBr').value = S.branch;
+    el.querySelector('#sLeg').value = String(S.legShots); el.querySelector('#sBr').value = S.branch; el.querySelector('#sAutoExt').value = S.autoExt;
     el.querySelector('#sFont').value = S.font; el.querySelector('#sPen').value = String(S.pen);
   }
 
@@ -2096,8 +2365,8 @@ details summary{cursor:pointer;color:var(--muted);margin:10px 0 6px}
       '<p><b>Pripojenie.</b> Ťukni na <i>Pripojiť</i> vpravo hore. DistoX2 najprv spáruj v systéme (PIN 0000), BLE prístroje nie. Prístroj vyberieš len prvýkrát; po výpadku aj po spustení appky sa pripája sám. Funguje v Chrome na Androide; iPhone nemá Web Serial ani Web Bluetooth.</p>' +
       '<p><b>Meranie.</b> Každé meranie je zámer z aktuálnej stanice (Od). Tri zhodné merania za sebou (±5 cm, ±1,7°) sa spoja do ťahu Od → Do a aktuálnou stanicou sa stane Do. Štvrté zhodné meranie ťah len spresní.</p>' +
       '<p><b>Stanice.</b> Nový prieskum začína bodom 1, ďalej 2, 3… Ťukni na pásik „Od → Do“: nastavíš, odkiaľ pokračuješ, a názov ďalšej stanice. Odbočka zo staršej stanice dostane ďalšie voľné číslo; pri názvoch so sériou (1.3) začne novú sériu (2.1).</p>' +
-      '<p><b>Tabuľka.</b> Ťuknutie na riadok ho označí (aj v náčrte). Šípka ▸ pred riadkom otvorí menu bodu: otočiť ťah, rozvinúť, pokračovať, premenovať, upraviť, rozdeliť, vymazať. Dvojklik alebo dlhé podržanie na hodnote ju priamo upraví (na ‹ › prepne smer v reze). Posledný riadok je nové meranie ručne z aktuálnej stanice: Do (prázdne = zámer), dĺžka, azimut, sklon, Enter alebo +. Ikona ↶ vráti posledný krok v dátach.</p>' +
-      '<p><b>Náčrt.</b> Pôdorys a rozvinutý rez. Predvolene posun: jedným prstom posúvaš, dvoma zväčšuješ, + a − priblížia a oddialia. Pero s farbami kreslí, guma maže celé čiary, ↶ vráti krok. Ťuknutím na bod otvoríš jeho menu. ⌖ dá aktívny bod do stredu a ukáže celý jeho polygón. Čiary sú ukotvené k najbližšej stanici, takže pri oprave dát sa posunú s ňou.</p>' +
+      '<p><b>Tabuľka.</b> Ťuknutie na riadok ho označí (aj v náčrte). Šípka ▸ otvorí menu bodu; jej dlhé podržanie (alebo Označiť v menu) zapne označovanie viacerých riadkov – z 2 a viac meraní spravíš ťah (upozorní na veľké rozdiely) alebo ich vymažeš. Dvojklik alebo dlhé podržanie na hodnote ju priamo upraví. Posledný riadok je nové meranie ručne. ↶ vráti posledný krok v dátach.</p>' +
+      '<p><b>Náčrt.</b> Predvolene posun, + a − priblížia a oddialia, pero kreslí. Ťuknutím na bod otvoríš jeho menu: + Scrap založí od bodu nový scrap nad alebo pod aktívnym (ostatné sa zošednú). Dlhé podržanie bodu iného scrapu ho prepne; prepne ho aj Pokračovať z bodu. Rozvinúť ‹ › sa riadi smerom polygónu na obrazovke. ⌖ dá aktívny bod do stredu a ukáže celý polygón.</p>' +
       '<p><b>Therion.</b> Export → Balík pre Therion: .th, .th2 s vloženým .xvi podkladom pre xtherion a PocketTopo .txt (xtherion ho importuje ako doteraz). Import vie načítať PocketTopo .txt aj zálohu .json.</p>' +
       '<p><b>Offline.</b> Po prvom otvorení funguje bez signálu. Dáta sa ukladajú v telefóne po každom meraní; pravidelne si rob export.</p>' +
       '</div>', [{ label: 'Rozumiem', cls: 'pri' }]);
@@ -2129,6 +2398,7 @@ details summary{cursor:pointer;color:var(--muted);margin:10px 0 6px}
   // ============================== zapojenie UI ==============================
   function showView(id) {
     curView = id;
+    if (id !== 'vData' && multi) exitMulti();
     document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id === id));
     document.querySelectorAll('#tabs [data-v]').forEach(b => b.classList.toggle('on', b.dataset.v === id));
     document.body.classList.toggle('sketching', id !== 'vData');
@@ -2155,8 +2425,8 @@ details summary{cursor:pointer;color:var(--muted);margin:10px 0 6px}
       '<button class="tb" data-tool="pan" title="Posun">' + ICON.hand + '</button>' +
       '<button class="tb" data-tool="erase" title="Guma">' + ICON.erase + '</button>' +
       '<button class="tb" id="tUndo" title="Späť">' + ICON.undo + '</button>' +
-      '<button class="tb" id="tZout" title="Oddialiť">' + ICON.zout + '</button>' +
       '<button class="tb" id="tZin" title="Priblížiť">' + ICON.zin + '</button>' +
+      '<button class="tb" id="tZout" title="Oddialiť">' + ICON.zout + '</button>' +
       '<button class="tb" id="tCenter" title="Na aktuálnu stanicu">' + ICON.target + '</button>' +
       '<button class="tb" id="tFit" title="Celý náčrt">' + ICON.fit + '</button>';
     planView = new SketchView($('#cvPlan'), 'plan');
@@ -2193,6 +2463,12 @@ details summary{cursor:pointer;color:var(--muted);margin:10px 0 6px}
     const tb = $('#tbody');
     let lp = null, lastTap = null;
     tb.addEventListener('pointerdown', e => {
+      const mn = e.target.closest('td.mn'), mtr = mn && mn.closest('tr');
+      if (mn && mtr && mtr.dataset.id && !multi) {   // dlhé podržanie šípky = označovanie viacerých riadkov
+        const me = { td: mn, x: e.clientX, y: e.clientY, fired: false };
+        me.timer = setTimeout(() => { if (lp === me) { me.fired = true; vib(25); enterMulti(mtr.dataset.id); } }, 550);
+        lp = me; return;
+      }
       const td = e.target.closest('td[data-f]');
       if (!td || td.classList.contains('editing')) { lp = null; return; }
       const me = { td, x: e.clientX, y: e.clientY, fired: false };
@@ -2209,6 +2485,7 @@ details summary{cursor:pointer;color:var(--muted);margin:10px 0 6px}
       lp = null;
       const tr = e.target.closest('tr'); if (!tr || !tr.dataset.id) return;
       const sh = sv.shots.find(x => x.id === tr.dataset.id); if (!sh) return;
+      if (multi) { if (multi.has(sh.id)) multi.delete(sh.id); else multi.add(sh.id); if (!multi.size) exitMulti(); else syncMulti(); return; }
       if (e.target.closest('td.mn')) { lastTap = null; select({ t: 'sh', id: sh.id }); if (sh.to) stationMenu(sh.to, sh); else splayMenu(sh); return; }
       const td = e.target.closest('td[data-f]'), now = performance.now();
       if (td && lastTap && lastTap.id === sh.id && lastTap.f === td.dataset.f && now - lastTap.t < 400) { lastTap = null; startEdit(td); return; }
@@ -2226,6 +2503,7 @@ details summary{cursor:pointer;color:var(--muted);margin:10px 0 6px}
     $('#enAdd').onclick = () => commitEntry(true);
     $('#enFrom').onclick = stationDialog;
     $('#enExt').onclick = () => { sv.ext = sv.ext >= 0 ? -1 : 1; save(); renderHeader(); renderEntry(); };
+    $('#mLeg').onclick = multiLeg; $('#mDel').onclick = multiDel; $('#mX').onclick = exitMulti;
     $('#btnUndoData').innerHTML = ICON.undo;
     $('#btnUndoData').onclick = undoDataStep;
     $('#emptyDev').onclick = deviceDialog;
