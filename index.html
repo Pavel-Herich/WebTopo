@@ -8,7 +8,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon-192.png">
 <title>WebTopo</title>
-<meta name="build" content="20261128-1312">
+<meta name="build" content="20261128-1333">
 <style>
 :root{--bg:#0f1720;--panel:#17212b;--panel2:#1e2a36;--line:#2a3846;--text:#e9eef2;--muted:#8fa0ae;--acc:#4fc3f7;--pri:#0288d1;--ok:#66bb6a;--warn:#ffb74d;--bad:#e57373;--leg:#ffffff}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -778,59 +778,83 @@ details summary{cursor:pointer;color:var(--muted);margin:10px 0 6px}
     return L.join('\r\n') + '\r\n';
   }
 
-  function xviGrid(geo, s, proj) {
+  // obsah projekcie, voliteľne len jedného scrapu (stanice, ťahy+zámery, čiary náčrtu)
+  function xviContent(s, geo, proj, scrapId) {
+    const key = proj === 'plan' ? 'p' : 'e';
+    let sts = null, shots = null;
+    if (scrapId) {
+      ensureScraps(s);
+      sts = scrapStations(s, proj, scrapId);
+      shots = new Set(s.shots.filter(x => shotScrap(s, x, proj) === scrapId).map(x => x.id));
+    }
+    const stations = [];
+    for (const [n, P] of geo.pos) if (!sts || sts.has(n)) stations.push([n, projXY(P, proj)]);
+    const segs = geo.segs.filter(sg => !shots || shots.has(sg.id)).map(sg => sg[key]);
+    const lines = s.sketch[proj].filter(st => !scrapId || strokeScrap(s, st, proj) === scrapId).map(st => ({ col: st.col || 'black', a: strokeAbs(st, geo, proj) }));
+    return { stations, segs, lines };
+  }
+  function gridOf(cn) {
     let minX = 0, minY = 0, maxX = 0, maxY = 0, first = true;
     const see = (x, y) => {
       if (first) { minX = maxX = x; minY = maxY = y; first = false; return; }
       if (x < minX) minX = x; if (x > maxX) maxX = x; if (y < minY) minY = y; if (y > maxY) maxY = y;
     };
-    for (const [, P] of geo.pos) { const q = projXY(P, proj); see(q[0], q[1]); }
-    for (const sg of geo.segs) { const c = sg[proj === 'plan' ? 'p' : 'e']; see(c[0], c[1]); see(c[2], c[3]); }
-    for (const st of s.sketch[proj]) { const a = strokeAbs(st, geo, proj); for (let k = 0; k < a.length; k += 2) see(a[k], a[k + 1]); }
+    for (const [, q] of cn.stations) see(q[0], q[1]);
+    for (const c of cn.segs) { see(c[0], c[1]); see(c[2], c[3]); }
+    for (const l of cn.lines) for (let k = 0; k < l.a.length; k += 2) see(l.a[k], l.a[k + 1]);
     const x0 = Math.floor(minX) - 1, y0 = Math.floor(minY) - 1;
     const nx = Math.ceil(maxX) + 1 - x0, ny = Math.ceil(maxY) + 1 - y0;
     return { x0: x0 * XVI_K, y0: y0 * XVI_K, nx, ny, g: XVI_K };
   }
-  function toXVI(s, proj) {
-    const geo = compute(s), k = XVI_K, key = proj === 'plan' ? 'p' : 'e';
-    const f = v => fmt(v * k, 2);
+  const xviGrid = (geo, s, proj) => gridOf(xviContent(s, geo, proj, null));
+  // XVI podklad pre xtherion/PreTherion; so scrapId len obsah daného scrapu
+  function toXVI(s, proj, scrapId) {
+    const geo = compute(s), k = XVI_K, f = v => fmt(v * k, 2);
+    const cn = xviContent(s, geo, proj, scrapId);
     const L = ['set XVIgrids {1.0 m}', 'set XVIstations {'];
-    for (const [n, P] of geo.pos) { const q = projXY(P, proj); L.push('  {' + f(q[0]) + ' ' + f(q[1]) + ' ' + n + '}'); }
+    for (const [n, q] of cn.stations) L.push('  {' + f(q[0]) + ' ' + f(q[1]) + ' ' + n + '}');
     L.push('}', 'set XVIshots {');
-    for (const sg of geo.segs) L.push('  {' + sg[key].map(f).join(' ') + '}');
+    for (const c of cn.segs) L.push('  {' + c.map(f).join(' ') + '}');
     L.push('}', 'set XVIsketchlines {');
-    for (const st of s.sketch[proj]) {
-      const a = strokeAbs(st, geo, proj);
-      if (a.length < 4) continue;
-      const pts = []; for (let j = 0; j < a.length; j += 2) pts.push(f(a[j]) + ' ' + f(a[j + 1]));
-      L.push('  {' + (st.col || 'black') + '  ' + pts.join('  ') + '}');
+    for (const l of cn.lines) {
+      if (l.a.length < 4) continue;
+      const pts = []; for (let j = 0; j < l.a.length; j += 2) pts.push(f(l.a[j]) + ' ' + f(l.a[j + 1]));
+      L.push('  {' + l.col + '  ' + pts.join('  ') + '}');
     }
-    const g = xviGrid(geo, s, proj);
+    const g = gridOf(cn);
     L.push('}', 'set XVIgrid {' + [fmt(g.x0, 2), fmt(g.y0, 2), fmt(g.g, 4), '0.0', '0.0', fmt(g.g, 4), g.nx, g.ny].join(' ') + '}');
     return L.join('\n') + '\n';
   }
-  // .th2 so vloženým .xvi podkladom a bodmi staníc na správnych miestach (pre xtherion).
-  function toTh2(s, proj, xviName, scrapName) {
+  // podklady projekcie: jeden .xvi na scrap (pri jedinom scrape <base>.xvi ako doteraz)
+  function xviParts(s, proj, base) {
+    ensureScraps(s);
+    const list = s.scraps[proj];
+    return list.map(sc => ({ sc, file: (list.length > 1 ? base + sc.name : base) + '.xvi' }));
+  }
+  // Jeden .th2 na projekciu: každý scrap má vlastný vložený .xvi podklad (všetky zapnuté)
+  // a vlastné body staníc; podklady sú umiestnené cez koreňovú stanicu, takže sedia na seba.
+  function toTh2(s, proj, base) {
+    if (/\.xvi$/i.test(base) && arguments.length > 3) base = arguments[3];   // staršie volanie (s, proj, xvi, scrap)
     const geo = compute(s), k = XVI_K, g = xviGrid(geo, s, proj);
     const W = g.nx * g.g, H = g.ny * g.g;
+    const X = q => fmt(q[0] * k - g.x0, 2), Y = q => fmt(q[1] * k - g.y0, 2);
     const L = ['encoding  utf-8',
       '##XTHERION## xth_me_area_adjust -128 -128 ' + fmt(W + 128, 2) + ' ' + fmt(H + 128, 2),
       '##XTHERION## xth_me_area_zoom_to 100'];
-    const first = geo.pos.keys().next();
-    if (!first.done) {
-      const q = projXY(geo.pos.get(first.value), proj);
-      L.push('##XTHERION## xth_me_image_insert {' + fmt(q[0] * k - g.x0, 2) + ' 1 1.0} {' + fmt(q[1] * k - g.y0, 2) + ' ' + first.value + '} ' + xviName + ' 0 {}');
+    const parts = xviParts(s, proj, base);
+    for (const { sc: scr, file } of parts) {
+      const root = xviContent(s, geo, proj, parts.length > 1 ? scr.id : null).stations[0];
+      if (root) L.push('##XTHERION## xth_me_image_insert {' + X(root[1]) + ' 1 1.0} {' + Y(root[1]) + ' ' + root[0] + '} ' + file + ' 0 {}');
     }
     // mierka v hlavičke: Therion ju pri scrape so stanicami nepotrebuje, PreTherion z nej berie mierku kresby
-    const sc = ' -scale [0 0 ' + fmt(SCRAP_SCALE_M * k, 3) + ' 0 0 0 ' + SCRAP_SCALE_M + ' 0 m]';
-    ensureScraps(s);
-    for (const { sc: scr, name } of scrapNames(s, proj, scrapName)) {
+    const scale = ' -scale [0 0 ' + fmt(SCRAP_SCALE_M * k, 3) + ' 0 0 0 ' + SCRAP_SCALE_M + ' 0 m]';
+    for (const { sc: scr, name } of scrapNames(s, proj, base)) {
       const sts = scrapStations(s, proj, scr.id);
-      L.push('', '', 'scrap ' + name + ' -projection ' + (proj === 'plan' ? 'plan' : 'extended') + sc);
+      L.push('', '', 'scrap ' + name + ' -projection ' + (proj === 'plan' ? 'plan' : 'extended') + scale);
       for (const [n, P] of geo.pos) {
         if (!sts.has(n)) continue;
         const q = projXY(P, proj);
-        L.push('  point ' + fmt(q[0] * k - g.x0, 2) + ' ' + fmt(q[1] * k - g.y0, 2) + ' station -name ' + n);
+        L.push('  point ' + X(q) + ' ' + Y(q) + ' station -name ' + n);
       }
       L.push('endscrap');
     }
@@ -864,10 +888,10 @@ details summary{cursor:pointer;color:var(--muted);margin:10px 0 6px}
     const b = safeName(s.name);
     return [
       { name: b + '.th', text: toTherion(s) },
-      { name: b + '_p.xvi', text: toXVI(s, 'plan') },
-      { name: b + '_e.xvi', text: toXVI(s, 'elev') },
-      { name: b + '_p.th2', text: toTh2(s, 'plan', b + '_p.xvi', b + '_p') },
-      { name: b + '_e.th2', text: toTh2(s, 'elev', b + '_e.xvi', b + '_e') },
+      ...['plan', 'elev'].flatMap(proj => {
+        const base = b + (proj === 'plan' ? '_p' : '_e'), parts = xviParts(s, proj, base);
+        return parts.map(x => ({ name: x.file, text: toXVI(s, proj, parts.length > 1 ? x.sc.id : null) })).concat([{ name: base + '.th2', text: toTh2(s, proj, base) }]);
+      }),
       { name: b + '_hlavny.th', text: toMain(s, b) },
       { name: b + '.thconfig', text: toThconfig(s, b) },
       { name: b + '_pockettopo.txt', text: toPocketTopo(s) },
@@ -983,7 +1007,7 @@ details summary{cursor:pointer;color:var(--muted);margin:10px 0 6px}
     addMeasurement, detectLeg, deleteShot, reverseShot, toggleExt, setLegExt, splitLeg, makeLeg, renameStation, stats, incoming, setExtend, legSign, screenExt, setScreenExt, autoExt,
     ensureScraps, shotScrap, strokeScrap, scrapStations, addScrap, stationScrap, activateFor, scrapNames, shotsSpread, checkMerge, mergeMeasurements, mergeShots,
     compute, projXY, makeStroke, strokeAbs,
-    toTherion, toPocketTopo, toXVI, toTh2, toMain, toThconfig, therionBundle, safeName, fromPocketTopo, fromJSON, crc32, zip, Simulator
+    toTherion, toPocketTopo, toXVI, xviParts, toTh2, toMain, toThconfig, therionBundle, safeName, fromPocketTopo, fromJSON, crc32, zip, Simulator
   };
 });
 
@@ -993,7 +1017,7 @@ details summary{cursor:pointer;color:var(--muted);margin:10px 0 6px}
 (() => {
   'use strict';
   const WT = window.WT, U = WT.UUID;
-  const APP_VERSION = '1.7';
+  const APP_VERSION = '1.8';
   const $ = s => document.querySelector(s);
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const num = v => parseFloat(String(v).trim().replace(',', '.'));

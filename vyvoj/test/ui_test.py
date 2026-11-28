@@ -325,9 +325,11 @@ with sync_playwright() as p:
     path = dl.value.path()
     z = zipfile.ZipFile(path)
     names = z.namelist()
-    check('export ZIP obsahuje .th, .th2, .xvi, .txt, .json, hlavný súbor a thconfig', all(any(n.endswith(s) for n in names) for s in ('.th', '_p.th2', '_e.th2', '_p.xvi', '_e.xvi', '_pockettopo.txt', '.json', '_hlavny.th', '.thconfig')), names)
+    check('export ZIP obsahuje .th, .th2, .xvi, .txt, .json, hlavný súbor a thconfig', all(any(n.endswith(s) for n in names) for s in ('.th', '_p.th2', '_e.th2', '_p1.xvi', '_p2.xvi', '_e.xvi', '_pockettopo.txt', '.json', '_hlavny.th', '.thconfig')) and sum(n.endswith('.th2') for n in names) == 2, names)
     mainf = z.read([n for n in names if n.endswith('_hlavny.th')][0]).decode()
     check('hlavný súbor: scrapy pôdorysu oddelené break', '_p1\n    break\n' in mainf and '_p2' in mainf, mainf)
+    th2p = z.read([n for n in names if n.endswith('_p.th2')][0]).decode()
+    check('jeden .th2 s podkladom pre každý scrap', th2p.count('xth_me_image_insert') == 2 and '_p1.xvi' in th2p and '_p2.xvi' in th2p and th2p.count('\nscrap ') == 2)
     import os as _os
     _os.makedirs(f'{OUT}/export', exist_ok=True); z.extractall(f'{OUT}/export')
     th = z.read([n for n in names if n.endswith('.th')][0]).decode()

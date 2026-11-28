@@ -260,6 +260,25 @@ ok('Scrapy: nový pod aktívnym, nové merania v ňom, export s break', () => {
   assert.strictEqual(WT.activateFor(s, '1', ['plan']), true); assert.strictEqual(s.act.plan, 'p1');
   assert.strictEqual(WT.activateFor(s, '2', ['plan']), false, 'zdieľaný bod nemení aktívny scrap');
 });
+ok('Podklad po scrapoch: jeden .th2, v ňom .xvi pre každý scrap na správnom mieste', () => {
+  const s = WT.newSurvey('S');
+  for (let k = 0; k < 3; k++) WT.addMeasurement(s, { d: 5, a: 90, i: 0 });
+  s.sketch.plan.push(WT.makeStroke([0, 1, 4, 1], 'black', WT.compute(s), 'plan', 0, 'p1'));
+  WT.addScrap(s, 'plan', '2', 'below');
+  for (let k = 0; k < 3; k++) WT.addMeasurement(s, { d: 4, a: 0, i: 0 });
+  s.sketch.plan.push(WT.makeStroke([5, 1, 5, 3], 'blue', WT.compute(s), 'plan', 0, 'p2'));
+  const files = WT.therionBundle(s).map(f => f.name);
+  assert.deepStrictEqual(files.filter(n => /\.(xvi|th2)$/.test(n)), ['S_p1.xvi', 'S_p2.xvi', 'S_p.th2', 'S_e.xvi', 'S_e.th2']);
+  const th2 = WT.toTh2(s, 'plan', 'S_p');
+  const ins = [...th2.matchAll(/xth_me_image_insert \{([-\d.]+) 1 1\.0\} \{([-\d.]+) (\S+)\} (\S+) /g)].map(m => ({ x: m[1], y: m[2], root: m[3], file: m[4] }));
+  assert.deepStrictEqual(ins.map(x => x.file), ['S_p1.xvi', 'S_p2.xvi']);
+  for (const x of ins) assert(th2.includes('  point ' + x.x + ' ' + x.y + ' station -name ' + x.root), 'koreň ' + x.root + ' sedí na bode stanice');
+  const stOf = xvi => [...xvi.split('set XVIshots')[0].matchAll(/\{[-\d.]+ [-\d.]+ (\S+)\}/g)].map(m => m[1]).sort();
+  const x1 = WT.toXVI(s, 'plan', 'p1'), x2 = WT.toXVI(s, 'plan', 'p2');
+  assert.deepStrictEqual(stOf(x1), ['1', '2']); assert.deepStrictEqual(stOf(x2), ['2', '3']);
+  assert(/\{black /.test(x1) && !/\{blue /.test(x1) && /\{blue /.test(x2) && !/\{black /.test(x2), 'čiary náčrtu po scrapoch');
+  assert.strictEqual(WT.toXVI(s, 'plan', 'p2').split('set XVIshots {')[1].split('}\n')[0].trim().split('\n').length, 1, 'v scrape 2 je jeden ťah');
+});
 ok('Viac riadkov → ťah, kontrola rozdielov a chyby', () => {
   const s = WT.newSurvey('t');
   WT.addMeasurement(s, { d: 3.00, a: 100, i: 1 }); WT.addMeasurement(s, { d: 3.02, a: 100.5, i: 1.2 }); WT.addMeasurement(s, { d: 1, a: 10, i: 0 });
